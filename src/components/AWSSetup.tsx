@@ -1,46 +1,62 @@
-'use client'
+'use client';
 
-import React, { useState } from 'react'
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import React, { useState } from 'react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
-const AWSSetup: React.FC = () => {
+const AWSSetup = () => {
   const [awsCredentials, setAwsCredentials] = useState({
     accessKeyId: '',
     secretAccessKey: '',
     region: ''
-  })
-  const [openApiSpec, setOpenApiSpec] = useState('')
-  const [output, setOutput] = useState('')
-  const [error, setError] = useState('')
+  });
+  const [applicationName, setApplicationName] = useState('');
+  const [openApiSpec, setOpenApiSpec] = useState('');
+  const [output, setOutput] = useState('');
+  const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-    setOutput('')
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setOutput('');
 
     try {
+      console.log('Submitting with application name:', applicationName);
+      
       const response = await fetch('/api/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ awsCredentials, openApiSpec }),
-      })
+        body: JSON.stringify({ awsCredentials, applicationName, openApiSpec }),
+      });
 
-      if (!response.ok) throw new Error('Failed to process request')
+      console.log('Response status:', response.status);
+      const result = await response.json();
+      console.log('Response body:', result);
 
-      const result = await response.json()
-      setOutput(result.output)
+      if (!response.ok) throw new Error(result.error || 'Failed to process request');
+
+      setOutput(result.output);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unknown error occurred')
+      console.error('Error in handleSubmit:', err);
+      setError(err.message);
     }
-  }
+  };
 
   return (
     <div className="max-w-2xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4">AWS API Gateway Setup</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block mb-1">Application Name:</label>
+          <Input
+            type="text"
+            value={applicationName}
+            onChange={(e) => setApplicationName(e.target.value)}
+            required
+          />
+        </div>
         <div>
           <label className="block mb-1">AWS Access Key ID:</label>
           <Input
@@ -77,7 +93,7 @@ const AWSSetup: React.FC = () => {
             rows={10}
           />
         </div>
-        <Button type="submit">Generate Terraform</Button>
+        <Button type="submit">Generate and Apply Terraform</Button>
       </form>
       {error && (
         <Alert variant="destructive" className="mt-4">
@@ -91,7 +107,7 @@ const AWSSetup: React.FC = () => {
         </div>
       )}
     </div>
-  )
-}
+  );
+};
 
-export default AWSSetup
+export default AWSSetup;
