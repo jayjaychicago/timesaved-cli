@@ -5,13 +5,14 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import AdmZip from 'adm-zip';
+import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(req: NextRequest) {
   try {
     const { awsCredentials, applicationName, openApiSpec } = await req.json();
     
     if (!awsCredentials || !applicationName || !openApiSpec) {
-      throw new Error('Missing AWS credentials, application name, OpenAPI specification');
+      throw new Error('Missing AWS credentials, application name, or OpenAPI specification');
     }
 
     // Configure AWS SDK
@@ -67,62 +68,62 @@ export async function POST(req: NextRequest) {
 }
 
 async function deleteExistingResources(applicationName: string) {
-    const lambda = new AWS.Lambda();
-    const apiGateway = new AWS.APIGateway();
-    const iam = new AWS.IAM();
-  
-    const lambdaFunctionName = `${applicationName}-lambda`;
-    const roleName = `${lambdaFunctionName}-role`;
-  
-    // Delete Lambda function
-    try {
-      await lambda.deleteFunction({ FunctionName: lambdaFunctionName }).promise();
-      console.log(`Deleted Lambda function: ${lambdaFunctionName}`);
-    } catch (error) {
-      console.log(`Lambda function ${lambdaFunctionName} not found or already deleted`);
-    }
-  
-    // Delete API Gateway
-    try {
-      const apis = await apiGateway.getRestApis().promise();
-      const api = apis.items.find(item => item.name === applicationName);
-      if (api) {
-        await apiGateway.deleteRestApi({ restApiId: api.id }).promise();
-        console.log(`Deleted API Gateway: ${applicationName}`);
-      }
-    } catch (error) {
-      console.log(`API Gateway ${applicationName} not found or already deleted`);
-    }
-  
-    // Delete IAM role
-    try {
-      // First, detach all policies from the role
-      const attachedPolicies = await iam.listAttachedRolePolicies({ RoleName: roleName }).promise();
-      for (const policy of attachedPolicies.AttachedPolicies) {
-        await iam.detachRolePolicy({
-          RoleName: roleName,
-          PolicyArn: policy.PolicyArn
-        }).promise();
-        console.log(`Detached policy ${policy.PolicyArn} from role ${roleName}`);
-      }
-  
-      // Then, delete any inline policies
-      const inlinePolicies = await iam.listRolePolicies({ RoleName: roleName }).promise();
-      for (const policyName of inlinePolicies.PolicyNames) {
-        await iam.deleteRolePolicy({
-          RoleName: roleName,
-          PolicyName: policyName
-        }).promise();
-        console.log(`Deleted inline policy ${policyName} from role ${roleName}`);
-      }
-  
-      // Finally, delete the role
-      await iam.deleteRole({ RoleName: roleName }).promise();
-      console.log(`Deleted IAM role: ${roleName}`);
-    } catch (error) {
-      console.log(`Error deleting IAM role ${roleName}: ${error.message}`);
-    }
+  const lambda = new AWS.Lambda();
+  const apiGateway = new AWS.APIGateway();
+  const iam = new AWS.IAM();
+
+  const lambdaFunctionName = `${applicationName}-lambda`;
+  const roleName = `${lambdaFunctionName}-role`;
+
+  // Delete Lambda function
+  try {
+    await lambda.deleteFunction({ FunctionName: lambdaFunctionName }).promise();
+    console.log(`Deleted Lambda function: ${lambdaFunctionName}`);
+  } catch (error) {
+    console.log(`Lambda function ${lambdaFunctionName} not found or already deleted`);
   }
+
+  // Delete API Gateway
+  try {
+    const apis = await apiGateway.getRestApis().promise();
+    const api = apis.items.find(item => item.name === applicationName);
+    if (api) {
+      await apiGateway.deleteRestApi({ restApiId: api.id }).promise();
+      console.log(`Deleted API Gateway: ${applicationName}`);
+    }
+  } catch (error) {
+    console.log(`API Gateway ${applicationName} not found or already deleted`);
+  }
+
+  // Delete IAM role
+  try {
+    // First, detach all policies from the role
+    const attachedPolicies = await iam.listAttachedRolePolicies({ RoleName: roleName }).promise();
+    for (const policy of attachedPolicies.AttachedPolicies) {
+      await iam.detachRolePolicy({
+        RoleName: roleName,
+        PolicyArn: policy.PolicyArn
+      }).promise();
+      console.log(`Detached policy ${policy.PolicyArn} from role ${roleName}`);
+    }
+
+    // Then, delete any inline policies
+    const inlinePolicies = await iam.listRolePolicies({ RoleName: roleName }).promise();
+    for (const policyName of inlinePolicies.PolicyNames) {
+      await iam.deleteRolePolicy({
+        RoleName: roleName,
+        PolicyName: policyName
+      }).promise();
+      console.log(`Deleted inline policy ${policyName} from role ${roleName}`);
+    }
+
+    // Finally, delete the role
+    await iam.deleteRole({ RoleName: roleName }).promise();
+    console.log(`Deleted IAM role: ${roleName}`);
+  } catch (error) {
+    console.log(`Error deleting IAM role ${roleName}: ${error.message}`);
+  }
+}
 
 function generateTerraformConfig(spec: any, awsCredentials: any, applicationName: string) {
     const apiName = applicationName.replace(/\s+/g, '-').toLowerCase();
@@ -177,61 +178,113 @@ function generateTerraformConfig(spec: any, awsCredentials: any, applicationName
     role       = aws_iam_role.lambda_role.name
   }
   `;
-
-  // Generate resources for each path and method in the OpenAPI spec
-  for (const [path, pathItem] of Object.entries(spec.paths)) {
-    const resourceName = path.replace(/[^a-zA-Z0-9]/g, '_');
-    config += `
-resource "aws_api_gateway_resource" "${resourceName}" {
-  rest_api_id = aws_api_gateway_rest_api.api.id
-  parent_id   = aws_api_gateway_rest_api.api.root_resource_id
-  path_part   = "${path.replace(/^\//, '')}"
-}
-`;
-
-    for (const [method, operation] of Object.entries(pathItem)) {
-      if (method.toLowerCase() !== 'options') {  // Skip 'options' method as it's usually added automatically
-        config += `
-resource "aws_api_gateway_method" "${resourceName}_${method}" {
-  rest_api_id   = aws_api_gateway_rest_api.api.id
-  resource_id   = aws_api_gateway_resource.${resourceName}.id
-  http_method   = "${method.toUpperCase()}"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "${resourceName}_${method}" {
-  rest_api_id = aws_api_gateway_rest_api.api.id
-  resource_id = aws_api_gateway_resource.${resourceName}.id
-  http_method = aws_api_gateway_method.${resourceName}_${method}.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.api_lambda.invoke_arn
-}
-`;
+  
+    const dependsOnList = [];
+  
+    // Generate resources for each path and method in the OpenAPI spec
+    for (const [path, pathItem] of Object.entries(spec.paths)) {
+      const resourceName = path.replace(/[^a-zA-Z0-9]/g, '_').replace(/^_/, '');
+      const uniqueId = uuidv4().split('-')[0]; // Use first part of UUID for brevity
+  
+      config += `
+  resource "aws_api_gateway_resource" "${resourceName}_${uniqueId}" {
+    rest_api_id = aws_api_gateway_rest_api.api.id
+    parent_id   = aws_api_gateway_rest_api.api.root_resource_id
+    path_part   = "${path.replace(/^\//, '')}"
+  }
+  `;
+  
+      for (const [method, operation] of Object.entries(pathItem)) {
+        if (method.toLowerCase() !== 'options') {
+          const integrationResourceName = `${resourceName}_${method.toLowerCase()}_${uniqueId}`;
+          dependsOnList.push(`aws_api_gateway_integration.${integrationResourceName}`);
+  
+          config += `
+  resource "aws_api_gateway_method" "${integrationResourceName}" {
+    rest_api_id   = aws_api_gateway_rest_api.api.id
+    resource_id   = aws_api_gateway_resource.${resourceName}_${uniqueId}.id
+    http_method   = "${method.toUpperCase()}"
+    authorization = "AWS_IAM"
+  }
+  
+  resource "aws_api_gateway_integration" "${integrationResourceName}" {
+    rest_api_id = aws_api_gateway_rest_api.api.id
+    resource_id = aws_api_gateway_resource.${resourceName}_${uniqueId}.id
+    http_method = aws_api_gateway_method.${integrationResourceName}.http_method
+  
+    integration_http_method = "POST"
+    type                    = "AWS_PROXY"
+    uri                     = aws_lambda_function.api_lambda.invoke_arn
+  }
+  `;
+        }
       }
+  
+      // Add OPTIONS method for CORS
+      config += `
+  resource "aws_api_gateway_method" "${resourceName}_options_${uniqueId}" {
+    rest_api_id   = aws_api_gateway_rest_api.api.id
+    resource_id   = aws_api_gateway_resource.${resourceName}_${uniqueId}.id
+    http_method   = "OPTIONS"
+    authorization = "NONE"
+  }
+  
+  resource "aws_api_gateway_integration" "${resourceName}_options_${uniqueId}" {
+    rest_api_id = aws_api_gateway_rest_api.api.id
+    resource_id = aws_api_gateway_resource.${resourceName}_${uniqueId}.id
+    http_method = aws_api_gateway_method.${resourceName}_options_${uniqueId}.http_method
+    type        = "MOCK"
+  
+    request_templates = {
+      "application/json" = jsonencode({ "statusCode" : 200 })
     }
   }
-
-  // Add deployment resource
-  config += `
-resource "aws_api_gateway_deployment" "api_deployment" {
-  depends_on = [${Object.entries(spec.paths).flatMap(([path, pathItem]) => 
-    Object.keys(pathItem)
-      .filter(method => method.toLowerCase() !== 'options')
-      .map(method => `aws_api_gateway_integration.${path.replace(/[^a-zA-Z0-9]/g, '_')}_${method}`)
-  ).join(', ')}]
-
-  rest_api_id = aws_api_gateway_rest_api.api.id
-  stage_name  = "prod"
-}
-
-output "api_url" {
-  value = aws_api_gateway_deployment.api_deployment.invoke_url
-}
-`;
-
-  return config;
-}
-
-
+  
+  resource "aws_api_gateway_method_response" "${resourceName}_options_200_${uniqueId}" {
+    rest_api_id = aws_api_gateway_rest_api.api.id
+    resource_id = aws_api_gateway_resource.${resourceName}_${uniqueId}.id
+    http_method = aws_api_gateway_method.${resourceName}_options_${uniqueId}.http_method
+    status_code = "200"
+  
+    response_models = {
+      "application/json" = "Empty"
+    }
+  
+    response_parameters = {
+      "method.response.header.Access-Control-Allow-Headers" = true
+      "method.response.header.Access-Control-Allow-Methods" = true
+      "method.response.header.Access-Control-Allow-Origin"  = true
+    }
+  }
+  
+  resource "aws_api_gateway_integration_response" "${resourceName}_options_200_${uniqueId}" {
+    rest_api_id = aws_api_gateway_rest_api.api.id
+    resource_id = aws_api_gateway_resource.${resourceName}_${uniqueId}.id
+    http_method = aws_api_gateway_method.${resourceName}_options_${uniqueId}.http_method
+    status_code = aws_api_gateway_method_response.${resourceName}_options_200_${uniqueId}.status_code
+  
+    response_parameters = {
+      "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+      "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS,POST,PUT'"
+      "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+    }
+  }
+  `;
+    }
+  
+    // Add deployment resource
+    config += `
+  resource "aws_api_gateway_deployment" "api_deployment" {
+    depends_on = [${dependsOnList.join(', ')}]
+  
+    rest_api_id = aws_api_gateway_rest_api.api.id
+    stage_name  = "prod"
+  }
+  
+  output "api_url" {
+    value = aws_api_gateway_deployment.api_deployment.invoke_url
+  }
+  `;
+  
+    return config;
+  }
