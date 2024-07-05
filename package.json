@@ -13,6 +13,7 @@
     "@shadcn/ui": "^0.0.4",
     "@types/adm-zip": "^0.5.5",
     "adm-zip": "^0.5.14",
+    "aws-amplify": "^6.3.8",
     "aws-sdk": "^2.1654.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
