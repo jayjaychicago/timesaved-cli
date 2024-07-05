@@ -1,6 +1,6 @@
 const poolData = {
-    UserPoolId: '$${user_pool_id}',
-    ClientId: '$${client_id}'
+  UserPoolId: '{{{user_pool_id}}}',
+  ClientId: '{{{client_id}}}'
 };
 
 const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);

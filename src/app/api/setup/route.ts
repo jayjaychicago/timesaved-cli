@@ -57,9 +57,11 @@
 
       // Create a temporary directory for Terraform files
       const tempDir = `/tmp/terraform-${applicationName}`;
+      
 
       try {
         fs.mkdirSync(tempDir, { recursive: true });
+     
 
         // Write files to the temporary directory
         fs.writeFileSync(path.join(tempDir, 'auth.js.tpl'), authJsTemplate);
@@ -83,6 +85,9 @@
 
         // Write Terraform configuration to a file
         fs.writeFileSync(path.join(tempDir, 'main.tf'), terraformConfig);
+  
+        //console.log('Terraform configuration written to main.tf: ',terraformConfig);
+
       } catch (error) {
         console.error('Error creating temporary directory or writing files:', error);
       } finally {
@@ -135,10 +140,11 @@
         console.log('Full Terraform apply output:', applyOutput);
         // Clean up
         console.log('Cleaning up temporary directory...');
-        fs.rmSync(tempDir, { recursive: true, force: true });
+       fs.rmSync(tempDir, { recursive: true, force: true });
 
         console.log('Terraform execution completed successfully.');
         return NextResponse.json({ output: 'Terraform execution completed successfully.' });
+      
       } catch (error) {
         console.error('Terraform execution error:', error);
         
@@ -173,6 +179,8 @@
       console.error('API route error:', error);
       return NextResponse.json({ error: error.message || 'An unexpected error occurred' }, { status: 400 });
     }
+
+    
   }
 
   async function deleteExistingResources(applicationName: string) {
@@ -369,9 +377,9 @@
       resource "aws_cognito_user_pool_client" "main" {
         name         = "${applicationName}-user-pool-client"
         user_pool_id = aws_cognito_user_pool.main.id
-    
+      
         generate_secret                      = false
-        explicit_auth_flows                  = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+        explicit_auth_flows                  = ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_PASSWORD_AUTH"]
         allowed_oauth_flows_user_pool_client = true
         allowed_oauth_flows                  = ["implicit"]
         allowed_oauth_scopes                 = ["email", "openid"]
@@ -388,10 +396,10 @@
       ${authJsTemplate}
       EOF
       
-        index_html_content = replace(local.index_html_template, "{{{USER_POOL_ID}}}", aws_cognito_user_pool.main.id)
+        index_html_content = replace(local.index_html_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
         auth_js_content = replace(
-          replace(local.auth_js_template, "{{{USER_POOL_ID}}}", aws_cognito_user_pool.main.id),
-          "{{{CLIENT_ID}}}", aws_cognito_user_pool_client.main.id
+          replace(local.auth_js_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id),
+          "{{{client_id}}}", aws_cognito_user_pool_client.main.id
         )
       }
       
