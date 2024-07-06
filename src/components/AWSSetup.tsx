@@ -17,7 +17,7 @@ const AWSSetup = () => {
   const [output, setOutput] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setOutput('');
@@ -38,10 +38,16 @@ const AWSSetup = () => {
       if (!response.ok) throw new Error(result.error || 'Failed to process request');
 
       setOutput(result.output);
-    } catch (err) {
-      console.error('Error in handleSubmit:', err);
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        console.error('Error in handleSubmit:', err);
+        setError(err.message);
+      } else {
+        console.error('Unknown error in handleSubmit:', err);
+        setError('An unknown error occurred');
+      }
     }
+    
   };
 
   return (
