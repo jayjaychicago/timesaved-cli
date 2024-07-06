@@ -56,6 +56,13 @@
               SwaggerUIBundle.plugins.DownloadUrl
             ],
             layout: "StandaloneLayout",
+            requestInterceptor: (request) => {
+                // Check if the request is for the S3 bucket
+                if (!request.url.includes(baseUrl)) {
+                    request.headers.Authorization = "Bearer " + token;
+                }
+                return request;
+            }
           });
         }
     </script>

@@ -542,7 +542,7 @@ EOF
 
 
     resource "aws_s3_object" "index_html" {
-      depends_on   = [aws_s3_bucket_public_access_block.website]
+      depends_on   = [aws_s3_bucket_public_access_block.website, aws_api_gateway_deployment.api_deployment]
       bucket       = aws_s3_bucket.website.id
       key          = "index.html"
       content_type = "text/html"
@@ -552,7 +552,7 @@ EOF
     }
     
     resource "aws_s3_object" "auth_js" {
-      depends_on   = [aws_s3_bucket_public_access_block.website]
+      depends_on   = [aws_s3_bucket_public_access_block.website, aws_api_gateway_deployment.api_deployment]
       bucket       = aws_s3_bucket.website.id
       key          = "auth.js"
       content_type = "application/javascript"
