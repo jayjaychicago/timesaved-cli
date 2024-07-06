@@ -1,345 +1,357 @@
-  import { NextRequest, NextResponse } from 'next/server';
-  import yaml from 'js-yaml';
-  import AWS from 'aws-sdk';
-  import { execSync, exec, spawn } from 'child_process';
-  import fs from 'fs';
-  import path from 'path';
-  import AdmZip from 'adm-zip';
-  import { v4 as uuidv4 } from 'uuid';
+import { NextRequest, NextResponse } from 'next/server';
+import yaml from 'js-yaml';
+import AWS from 'aws-sdk';
+import { execSync, exec, spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import AdmZip from 'adm-zip';
+import { v4 as uuidv4 } from 'uuid';
 
-  function execWithTimeout(command: string, cwd: string, timeout: number): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const child = exec(command, { cwd, encoding: 'utf8' }, (error, stdout, stderr) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve(stdout);
-        }
-      });
-
-      setTimeout(() => {
-        child.kill();
-        reject(new Error(`Command timed out after ${timeout}ms: ${command}`));
-      }, timeout);
+function execWithTimeout(command: string, cwd: string, timeout: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = exec(command, { cwd, encoding: 'utf8' }, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(stdout);
+      }
     });
-  }
 
+    setTimeout(() => {
+      child.kill();
+      reject(new Error(`Command timed out after ${timeout}ms: ${command}`));
+    }, timeout);
+  });
+}
 
-  export async function POST(req: NextRequest) {
+interface AwsCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  region: string;
+}
+
+interface RequestBody {
+  awsCredentials: AwsCredentials;
+  applicationName: string;
+  openApiSpec: string;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body: RequestBody = await req.json();
+    const { awsCredentials, applicationName, openApiSpec } = body;
+    
+    if (!awsCredentials || !applicationName || !openApiSpec) {
+      throw new Error('Missing AWS credentials, application name, or OpenAPI specification');
+    }
+
+    // Read auth.js.tpl and index.html contents
+    const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'auth.js.tpl'), 'utf8');
+    const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'index.html'), 'utf8');
+    
+    // Configure AWS SDK
+    AWS.config.update({
+      accessKeyId: awsCredentials.accessKeyId,
+      secretAccessKey: awsCredentials.secretAccessKey,
+      region: awsCredentials.region
+    });
+
+    const cognito = new AWS.CognitoIdentityServiceProvider({
+      apiVersion: '2016-04-18'
+    });
+
+    // Delete existing resources
+    await deleteExistingResources(applicationName);
+
+    const spec = yaml.load(openApiSpec) as any;
+    const terraformConfig = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec);
+    console.log('Terraform configuration completed.');
+
+    // Create a temporary directory for Terraform files
+    const tempDir = `/tmp/terraform-${applicationName}`;
+    
+
     try {
-      const { awsCredentials, applicationName, openApiSpec } = await req.json();
-      
-      if (!awsCredentials || !applicationName || !openApiSpec) {
-        throw new Error('Missing AWS credentials, application name, or OpenAPI specification');
-      }
+      fs.mkdirSync(tempDir, { recursive: true });
+   
 
-//      console.log('First line of openapi spec:', openApiSpec.split('\n')[0]);
+      // Write files to the temporary directory
+      fs.writeFileSync(path.join(tempDir, 'auth.js.tpl'), authJsTemplate);
+      fs.writeFileSync(path.join(tempDir, 'index.html'), indexHtmlTemplate);
+      fs.writeFileSync(path.join(tempDir, 'lambda_function.mjs'), fs.readFileSync(path.join(process.cwd(), 'src', 'lambda_function.mjs'), 'utf8'));
+      fs.writeFileSync(path.join(tempDir, 'html_lambda.js'), fs.readFileSync(path.join(process.cwd(), 'src', 'html_lambda.js'), 'utf8'));
+      fs.writeFileSync(path.join(tempDir, 'token_lambda.js'), fs.readFileSync(path.join(process.cwd(), 'src', 'token_lambda.js'), 'utf8'));
 
-      // Read auth.js.tpl and index.html contents
-      const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'auth.js.tpl'), 'utf8');
-      const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'index.html'), 'utf8');
-      
-      // Configure AWS SDK
-      AWS.config.update({
-        accessKeyId: awsCredentials.accessKeyId,
-        secretAccessKey: awsCredentials.secretAccessKey,
-        region: awsCredentials.region
-      });
+      // Create zip files
+      const zip = new AdmZip();
+      zip.addLocalFile(path.join(tempDir, 'lambda_function.mjs'));
+      zip.writeZip(path.join(tempDir, 'lambda_function.zip'));
 
-      const cognito = new AWS.CognitoIdentityServiceProvider({
-        apiVersion: '2016-04-18'
-      });
+      const zip2 = new AdmZip();
+      zip2.addLocalFile(path.join(tempDir, 'html_lambda.js'));
+      zip2.writeZip(path.join(tempDir, 'html_lambda.zip'));
 
-      // Delete existing resources
-      await deleteExistingResources(applicationName);
+      const zip3 = new AdmZip();
+      zip3.addLocalFile(path.join(tempDir, 'token_lambda.js'));
+      zip3.writeZip(path.join(tempDir, 'token_lambda.zip'));
 
-      const spec = yaml.load(openApiSpec);
-      const terraformConfig = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec);
-      console.log('Terraform configuration completed.');
+      // Write Terraform configuration to a file
+      fs.writeFileSync(path.join(tempDir, 'main.tf'), terraformConfig);
 
-      // Create a temporary directory for Terraform files
-      const tempDir = `/tmp/terraform-${applicationName}`;
-      
-
-      try {
-        fs.mkdirSync(tempDir, { recursive: true });
-     
-
-        // Write files to the temporary directory
-        fs.writeFileSync(path.join(tempDir, 'auth.js.tpl'), authJsTemplate);
-        fs.writeFileSync(path.join(tempDir, 'index.html'), indexHtmlTemplate);
-        fs.writeFileSync(path.join(tempDir, 'lambda_function.mjs'), fs.readFileSync(path.join(process.cwd(), 'src', 'lambda_function.mjs'), 'utf8'));
-        fs.writeFileSync(path.join(tempDir, 'html_lambda.js'), fs.readFileSync(path.join(process.cwd(), 'src', 'html_lambda.js'), 'utf8'));
-        fs.writeFileSync(path.join(tempDir, 'token_lambda.js'), fs.readFileSync(path.join(process.cwd(), 'src', 'token_lambda.js'), 'utf8'));
-
-        // Create zip files
-        const zip = new AdmZip();
-        zip.addLocalFile(path.join(tempDir, 'lambda_function.mjs'));
-        zip.writeZip(path.join(tempDir, 'lambda_function.zip'));
-
-        const zip2 = new AdmZip();
-        zip2.addLocalFile(path.join(tempDir, 'html_lambda.js'));
-        zip2.writeZip(path.join(tempDir, 'html_lambda.zip'));
-
-        const zip3 = new AdmZip();
-        zip3.addLocalFile(path.join(tempDir, 'token_lambda.js'));
-        zip3.writeZip(path.join(tempDir, 'token_lambda.zip'));
-
-        // Write Terraform configuration to a file
-        fs.writeFileSync(path.join(tempDir, 'main.tf'), terraformConfig);
-  
-        //console.log('Terraform configuration written to main.tf: ',terraformConfig);
-
-      } catch (error) {
-        console.error('Error creating temporary directory or writing files:', error);
-      } finally {
-        console.log('Terraform tempdir completed.');
-      }
-
-      // Run Terraform commands
-      try {
-        console.log('Starting Terraform initialization...');
-        const initOutput = await execWithTimeout('terraform init', tempDir, 60000);
-        console.log('Terraform initialization output:', initOutput);
-
-        console.log('Starting Terraform plan...');
-        const planOutput = await execWithTimeout('terraform plan -out=tfplan', tempDir, 300000);
-        console.log('Terraform plan output:', planOutput);
-
-        console.log('Terraform plan contents:');
-        const planContents = await execWithTimeout('terraform show tfplan', tempDir, 60000);
-        console.log(planContents);
-
-        console.log('Starting Terraform apply...');
-        const applyProcess = spawn('terraform', ['apply', '-auto-approve'], { cwd: tempDir });
-        
-        let applyOutput = '';
-        let applyError = '';
-        
-        applyProcess.stdout.on('data', (data) => {
-          const output = data.toString();
-          applyOutput += output;
-          console.log(`Terraform apply output: ${output}`);
-        });
-        
-        applyProcess.stderr.on('data', (data) => {
-          const error = data.toString();
-          applyError += error;
-          console.error(`Terraform apply error: ${error}`);
-        });
-        
-        const applyExitCode = await new Promise<number>((resolve) => {
-          applyProcess.on('close', resolve);
-        });
-        
-        if (applyExitCode !== 0) {
-          console.error('Full Terraform apply output:', applyOutput);
-          console.error('Full Terraform apply error:', applyError);
-          throw new Error(`Terraform apply failed with exit code ${applyExitCode}`);
-        }
-        
-        console.log('Terraform apply completed successfully.');
-        console.log('Full Terraform apply output:', applyOutput);
-        // Clean up
-        console.log('Cleaning up temporary directory...');
-       fs.rmSync(tempDir, { recursive: true, force: true });
-
-        console.log('Terraform execution completed successfully.');
-        return NextResponse.json({ output: 'Terraform execution completed successfully.' });
-      
-      } catch (error) {
-        console.error('Terraform execution error:', error);
-        
-        // Log the contents of the Terraform directory
-        console.log('Contents of Terraform directory:');
-        const dirContents = fs.readdirSync(tempDir);
-        //console.log(dirContents);
-
-        // If there's a terraform.tfstate file, log its contents
-        const tfstatePath = path.join(tempDir, 'terraform.tfstate');
-        if (fs.existsSync(tfstatePath)) {
-          console.log('Contents of terraform.tfstate:');
-          const tfstate = fs.readFileSync(tfstatePath, 'utf8');
-          //console.log(tfstate);
-        }
-
-        // If there's a terraform.tfstate.backup file, log its contents
-        const tfstateBackupPath = path.join(tempDir, 'terraform.tfstate.backup');
-        if (fs.existsSync(tfstateBackupPath)) {
-          console.log('Contents of terraform.tfstate.backup:');
-          const tfstateBackup = fs.readFileSync(tfstateBackupPath, 'utf8');
-          //console.log(tfstateBackup);
-        }
-
-        // Clean up
-        console.log('Cleaning up temporary directory after error...', tempDir);
-        fs.rmSync(tempDir, { recursive: true, force: true });
-
-        return NextResponse.json({ error: `Terraform execution failed: ${error.message}` }, { status: 500 });
-      }
     } catch (error) {
-      console.error('API route error:', error);
+      console.error('Error creating temporary directory or writing files:', error);
+    } finally {
+      console.log('Terraform tempdir completed.');
+    }
+
+    // Run Terraform commands
+    try {
+      console.log('Starting Terraform initialization...');
+      const initOutput = await execWithTimeout('terraform init', tempDir, 60000);
+      console.log('Terraform initialization output:', initOutput);
+
+      console.log('Starting Terraform plan...');
+      const planOutput = await execWithTimeout('terraform plan -out=tfplan', tempDir, 300000);
+      console.log('Terraform plan output:', planOutput);
+
+      console.log('Terraform plan contents:');
+      const planContents = await execWithTimeout('terraform show tfplan', tempDir, 60000);
+      console.log(planContents);
+
+      console.log('Starting Terraform apply...');
+      const applyProcess = spawn('terraform', ['apply', '-auto-approve'], { cwd: tempDir });
+      
+      let applyOutput = '';
+      let applyError = '';
+      
+      applyProcess.stdout.on('data', (data: Buffer) => {
+        const output = data.toString();
+        applyOutput += output;
+        console.log(`Terraform apply output: ${output}`);
+      });
+      
+      applyProcess.stderr.on('data', (data: Buffer) => {
+        const error = data.toString();
+        applyError += error;
+        console.error(`Terraform apply error: ${error}`);
+      });
+      
+      const applyExitCode = await new Promise<number>((resolve) => {
+        applyProcess.on('close', resolve);
+      });
+      
+      if (applyExitCode !== 0) {
+        console.error('Full Terraform apply output:', applyOutput);
+        console.error('Full Terraform apply error:', applyError);
+        throw new Error(`Terraform apply failed with exit code ${applyExitCode}`);
+      }
+      
+      console.log('Terraform apply completed successfully.');
+      console.log('Full Terraform apply output:', applyOutput);
+      // Clean up
+      console.log('Cleaning up temporary directory...');
+     fs.rmSync(tempDir, { recursive: true, force: true });
+
+      console.log('Terraform execution completed successfully.');
+      return NextResponse.json({ output: 'Terraform execution completed successfully.' });
+    
+    } catch (error) {
+      console.error('Terraform execution error:', error);
+      
+      // Log the contents of the Terraform directory
+      console.log('Contents of Terraform directory:');
+      const dirContents = fs.readdirSync(tempDir);
+
+      // If there's a terraform.tfstate file, log its contents
+      const tfstatePath = path.join(tempDir, 'terraform.tfstate');
+      if (fs.existsSync(tfstatePath)) {
+        console.log('Contents of terraform.tfstate:');
+        const tfstate = fs.readFileSync(tfstatePath, 'utf8');
+      }
+
+      // If there's a terraform.tfstate.backup file, log its contents
+      const tfstateBackupPath = path.join(tempDir, 'terraform.tfstate.backup');
+      if (fs.existsSync(tfstateBackupPath)) {
+        console.log('Contents of terraform.tfstate.backup:');
+        const tfstateBackup = fs.readFileSync(tfstateBackupPath, 'utf8');
+      }
+
+      // Clean up
+      console.log('Cleaning up temporary directory after error...', tempDir);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      
+      return NextResponse.json({ error: `Terraform execution failed: ${(error as Error).message}` }, { status: 500 });
+    }
+  } catch (error) {
+    console.error('API route error:', error);
+    if (error instanceof Error) {
       return NextResponse.json({ error: error.message || 'An unexpected error occurred' }, { status: 400 });
     }
-
-    
+    return NextResponse.json({ error: 'An unexpected error occurred' }, { status: 400 });
   }
+}
 
-  async function deleteExistingResources(applicationName: string) {
-    const lambda = new AWS.Lambda();
-    const apiGateway = new AWS.APIGateway();
-    const iam = new AWS.IAM();
-    const cognito = new AWS.CognitoIdentityServiceProvider();
-    const cloudfront = new AWS.CloudFront();
-    const s3 = new AWS.S3();
 
-    const lambdaFunctionName = `${applicationName}-lambda`;
-    const roleName = `${lambdaFunctionName}-role`;
-    const userPoolName = `${applicationName}-user-pool`;
-    const bucketName = `${applicationName.replace(/\s+/g, '-').toLowerCase()}-auth-website`;
+async function deleteExistingResources(applicationName: string): Promise<void> {
+  const lambda = new AWS.Lambda();
+  const apiGateway = new AWS.APIGateway();
+  const iam = new AWS.IAM();
+  const cognito = new AWS.CognitoIdentityServiceProvider();
+  const cloudfront = new AWS.CloudFront();
+  const s3 = new AWS.S3();
 
-    console.log('Starting resource deletion process...');
+  const lambdaFunctionName = `${applicationName}-lambda`;
+  const roleName = `${lambdaFunctionName}-role`;
+  const userPoolName = `${applicationName}-user-pool`;
+  const bucketName = `${applicationName.replace(/\s+/g, '-').toLowerCase()}-auth-website`;
 
-    // Helper function to handle timeouts
-    const withTimeout = (promise, ms, errorMessage) => {
-      let timeout = new Promise((_, reject) => {
-        let id = setTimeout(() => {
-          clearTimeout(id);
-          reject(new Error(`Timed out in ${ms}ms: ${errorMessage}`));
-        }, ms);
-      });
+  console.log('Starting resource deletion process...');
 
-      return Promise.race([
-        promise,
-        timeout
-      ]);
-    };
+  // Helper function to handle timeouts
+  const withTimeout = <T>(promise: Promise<T>, ms: number, errorMessage: string): Promise<T> => {
+    let timeoutId: NodeJS.Timeout;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Timed out in ${ms}ms: ${errorMessage}`));
+      }, ms);
+    });
 
-    try {
-      console.log('Deleting CloudFront distribution...');
-      await withTimeout(
-        (async () => {
-          const distributions = await cloudfront.listDistributions().promise();
-          const distribution = distributions.DistributionList.Items.find(
-            item => item.Comment === applicationName
-          );
-          if (distribution) {
+    return Promise.race([
+      promise,
+      timeoutPromise
+    ]).finally(() => clearTimeout(timeoutId));
+  };
+
+  try {
+    console.log('Deleting CloudFront distribution...');
+    await withTimeout(
+      (async () => {
+        const distributions = await cloudfront.listDistributions().promise();
+        const distribution = distributions.DistributionList?.Items?.find(
+          item => item.Comment === applicationName
+        );
+        if (distribution && distribution.Id) {
+          const distributionDetails = await cloudfront.getDistribution({ Id: distribution.Id }).promise();
+          if (distributionDetails.ETag) {
             await cloudfront.deleteDistribution({
               Id: distribution.Id,
-              IfMatch: distribution.ETag
+              IfMatch: distributionDetails.ETag
             }).promise();
             console.log(`Deleted CloudFront distribution: ${distribution.Id}`);
-          } else {
-            console.log(`CloudFront distribution not found for application: ${applicationName}`);
           }
-        })(),
-        300000,
-        'CloudFront distribution deletion'
-      );
-
-      console.log('Deleting Lambda function...');
-      await withTimeout(
-        (async () => {
-          try {
-            await lambda.deleteFunction({ FunctionName: lambdaFunctionName }).promise();
-            console.log(`Deleted Lambda function: ${lambdaFunctionName}`);
-          } catch (error) {
-            console.log(`Lambda function ${lambdaFunctionName} not found or already deleted`);
-          }
-        })(),
-        60000,
-        'Lambda function deletion'
-      );
-
-      console.log('Deleting API Gateway...');
-      await withTimeout(
-        (async () => {
-          const apis = await apiGateway.getRestApis().promise();
-          const api = apis.items.find(item => item.name === applicationName);
-          if (api) {
-            await apiGateway.deleteRestApi({ restApiId: api.id }).promise();
-            console.log(`Deleted API Gateway: ${applicationName}`);
-          }
-        })(),
-        60000,
-        'API Gateway deletion'
-      );
-
-      console.log('Deleting IAM role...');
-      await withTimeout(
-        (async () => {
-          try {
-            const attachedPolicies = await iam.listAttachedRolePolicies({ RoleName: roleName }).promise();
-            for (const policy of attachedPolicies.AttachedPolicies) {
-              await iam.detachRolePolicy({
-                RoleName: roleName,
-                PolicyArn: policy.PolicyArn
-              }).promise();
-              console.log(`Detached policy ${policy.PolicyArn} from role ${roleName}`);
-            }
-
-            const inlinePolicies = await iam.listRolePolicies({ RoleName: roleName }).promise();
-            for (const policyName of inlinePolicies.PolicyNames) {
-              await iam.deleteRolePolicy({
-                RoleName: roleName,
-                PolicyName: policyName
-              }).promise();
-              console.log(`Deleted inline policy ${policyName} from role ${roleName}`);
-            }
-
-            await iam.deleteRole({ RoleName: roleName }).promise();
-            console.log(`Deleted IAM role: ${roleName}`);
-          } catch (error) {
-            console.log(`Error deleting IAM role ${roleName}: ${error.message}`);
-          }
-        })(),
-        60000,
-        'IAM role deletion'
-      );
-
-      console.log('Deleting Cognito User Pool...');
-      await withTimeout(
-        (async () => {
-          const listPoolsResponse = await cognito.listUserPools({ MaxResults: 60 }).promise();
-          const userPool = listPoolsResponse.UserPools.find(pool => pool.Name === userPoolName);
-          if (userPool) {
-            await cognito.deleteUserPool({ UserPoolId: userPool.Id }).promise();
-            console.log(`Deleted Cognito User Pool: ${userPoolName}`);
-          }
-        })(),
-        60000,
-        'Cognito User Pool deletion'
-      );
-
-      console.log('Deleting S3 bucket...');
-      await withTimeout(
-        (async () => {
-          try {
-            const objects = await s3.listObjectsV2({ Bucket: bucketName }).promise();
-            if (objects.Contents && objects.Contents.length > 0) {
-              await s3.deleteObjects({
-                Bucket: bucketName,
-                Delete: { Objects: objects.Contents.map(({ Key }) => ({ Key })) }
-              }).promise();
-            }
-
-            await s3.deleteBucket({ Bucket: bucketName }).promise();
-            console.log(`Deleted S3 bucket: ${bucketName}`);
-          } catch (error) {
-            if (error.code !== 'NoSuchBucket') {
-              console.log(`Error deleting S3 bucket: ${error.message}`);
-            }
-          }
-        })(),
-        60000,
-        'S3 bucket deletion'
-      );
-
-      console.log('Resource deletion process completed successfully.');
-    } catch (error) {
-      console.error('Error in deleteExistingResources:', error);
-    }
+        } else {
+          console.log(`CloudFront distribution not found for application: ${applicationName}`);
+        }
+      })(),
+      300000,  // Timeout of 5 minutes
+      'CloudFront distribution deletion timeout'
+    );
+  } catch (error) {
+    console.error('Error deleting CloudFront distribution:', error);
   }
+
+  console.log('Deleting Lambda function...');
+  await withTimeout(
+    (async () => {
+      try {
+        await lambda.deleteFunction({ FunctionName: lambdaFunctionName }).promise();
+        console.log(`Deleted Lambda function: ${lambdaFunctionName}`);
+      } catch (error) {
+        console.log(`Lambda function ${lambdaFunctionName} not found or already deleted`);
+      }
+    })(),
+    60000,
+    'Lambda function deletion'
+  );
+
+  console.log('Deleting API Gateway...');
+  await withTimeout(
+    (async () => {
+      const apis = await apiGateway.getRestApis().promise();
+      const api = apis.items?.find(item => item.name === applicationName);
+      if (api && api.id) {
+        await apiGateway.deleteRestApi({ restApiId: api.id }).promise();
+        console.log(`Deleted API Gateway: ${applicationName}`);
+      }
+    })(),
+    60000,
+    'API Gateway deletion'
+  );
+
+  console.log('Deleting IAM role...');
+  await withTimeout(
+    (async () => {
+      try {
+        const attachedPolicies = await iam.listAttachedRolePolicies({ RoleName: roleName }).promise();
+        for (const policy of attachedPolicies.AttachedPolicies || []) {
+          if (policy.PolicyArn) {
+            await iam.detachRolePolicy({
+              RoleName: roleName,
+              PolicyArn: policy.PolicyArn
+            }).promise();
+            console.log(`Detached policy ${policy.PolicyArn} from role ${roleName}`);
+          }
+        }
+
+        const inlinePolicies = await iam.listRolePolicies({ RoleName: roleName }).promise();
+        for (const policyName of inlinePolicies.PolicyNames || []) {
+          await iam.deleteRolePolicy({
+            RoleName: roleName,
+            PolicyName: policyName
+          }).promise();
+          console.log(`Deleted inline policy ${policyName} from role ${roleName}`);
+        }
+
+        await iam.deleteRole({ RoleName: roleName }).promise();
+        console.log(`Deleted IAM role: ${roleName}`);
+      } catch (error) {
+        console.log(`Error deleting IAM role ${roleName}: ${(error as Error).message}`);
+      }
+    })(),
+    60000,
+    'IAM role deletion'
+  );
+
+  console.log('Deleting Cognito User Pool...');
+  await withTimeout(
+    (async () => {
+      const listPoolsResponse = await cognito.listUserPools({ MaxResults: 60 }).promise();
+      const userPool = listPoolsResponse.UserPools?.find(pool => pool.Name === userPoolName);
+      if (userPool && userPool.Id) {
+        await cognito.deleteUserPool({ UserPoolId: userPool.Id }).promise();
+        console.log(`Deleted Cognito User Pool: ${userPoolName}`);
+      }
+    })(),
+    60000,
+    'Cognito User Pool deletion'
+  );
+
+  console.log('Deleting S3 bucket...');
+  await withTimeout(
+    (async () => {
+      try {
+        const objects = await s3.listObjectsV2({ Bucket: bucketName }).promise();
+        if (objects.Contents && objects.Contents.length > 0) {
+          await s3.deleteObjects({
+            Bucket: bucketName,
+            Delete: { Objects: objects.Contents.map(({ Key }) => ({ Key: Key || '' })) }
+          }).promise();
+        }
+
+        await s3.deleteBucket({ Bucket: bucketName }).promise();
+        console.log(`Deleted S3 bucket: ${bucketName}`);
+      } catch (error) {
+        if ((error as AWS.AWSError).code !== 'NoSuchBucket') {
+          console.log(`Error deleting S3 bucket: ${(error as Error).message}`);
+        }
+      }
+    })(),
+    60000,
+    'S3 bucket deletion'
+  );
+
+  console.log('Resource deletion process completed successfully.');
+}
 
   function prepareOpenApiSpec(openApiSpec:string) {
     // Regex to find existing server URL entries or spot where to insert a new one
@@ -673,7 +685,7 @@ EOF
     }
     `;
     
-        for (const [method, operation] of Object.entries(pathItem)) {
+        for (const [method, operation] of Object.entries(pathItem as Record<string, unknown>)) {
           if (method.toLowerCase() !== 'options') {
             const integrationResourceName = `${resourceName}_${method.toLowerCase()}_${uniqueId}`;
             dependsOnList.push(`aws_api_gateway_integration.${integrationResourceName}`);
