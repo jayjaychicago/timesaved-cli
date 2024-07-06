@@ -63,6 +63,7 @@ document.getElementById('signinForm').addEventListener('submit', function(e) {
     cognitoUser.authenticateUser(authenticationDetails, {
         onSuccess: function(result) {
             const idToken = result.getIdToken().getJwtToken();
+            localStorage.setItem('idToken', idToken);
             document.getElementById('tokenDisplay').innerHTML = `
     <h3>Authentication Successful</h3>
     <p>Your ID Token (use this for API requests):</p>

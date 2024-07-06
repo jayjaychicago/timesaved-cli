@@ -6,6 +6,7 @@
     <title>API Authentication</title>
     <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js/dist/amazon-cognito-identity.min.js"></script>
     <script src="auth.js" defer></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui.css">
 </head>
 <body>
     <h1>API Authentication</h1>
@@ -33,5 +34,30 @@
     </form>
 
     <div id="tokenDisplay"></div>
+    <div id="swagger-ui"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui-bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui-standalone-preset.js"></script>
+    <script src="auth.js"></script> <!-- Your existing JavaScript file -->
+    <script>
+        // Initialize Swagger UI on your API specification
+        window.onload = function() {
+          const ui = SwaggerUIBundle({
+            url: "path_to_your_openapi.yaml", // You can also use a JSON object directly
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            presets: [
+              SwaggerUIBundle.presets.apis,
+              SwaggerUIStandalonePreset
+            ],
+            plugins: [
+              SwaggerUIBundle.plugins.DownloadUrl
+            ],
+            layout: "StandaloneLayout",
+          });
+        }
+    </script>
+
+
 </body>
 </html>

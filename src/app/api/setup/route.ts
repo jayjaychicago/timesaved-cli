@@ -151,14 +151,14 @@
         // Log the contents of the Terraform directory
         console.log('Contents of Terraform directory:');
         const dirContents = fs.readdirSync(tempDir);
-        console.log(dirContents);
+        //console.log(dirContents);
 
         // If there's a terraform.tfstate file, log its contents
         const tfstatePath = path.join(tempDir, 'terraform.tfstate');
         if (fs.existsSync(tfstatePath)) {
           console.log('Contents of terraform.tfstate:');
           const tfstate = fs.readFileSync(tfstatePath, 'utf8');
-          console.log(tfstate);
+          //console.log(tfstate);
         }
 
         // If there's a terraform.tfstate.backup file, log its contents
@@ -166,11 +166,11 @@
         if (fs.existsSync(tfstateBackupPath)) {
           console.log('Contents of terraform.tfstate.backup:');
           const tfstateBackup = fs.readFileSync(tfstateBackupPath, 'utf8');
-          console.log(tfstateBackup);
+          //console.log(tfstateBackup);
         }
 
         // Clean up
-        console.log('Cleaning up temporary directory after error...');
+        console.log('Cleaning up temporary directory after error...', tempDir);
         fs.rmSync(tempDir, { recursive: true, force: true });
 
         return NextResponse.json({ error: `Terraform execution failed: ${error.message}` }, { status: 500 });
@@ -395,6 +395,10 @@
         auth_js_template = <<EOF
       ${authJsTemplate}
       EOF
+
+      openapi_yaml_content = <<EOF
+      ${spec}
+      EOF
       
         index_html_content = replace(local.index_html_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
         auth_js_content = replace(
@@ -448,22 +452,7 @@
         }
       }
       
-      resource "aws_s3_bucket_policy" "website" {
-        bucket = aws_s3_bucket.website.id
-      
-        policy = jsonencode({
-          Version = "2012-10-17"
-          Statement = [
-            {
-              Sid       = "PublicReadGetObject"
-              Effect    = "Allow"
-              Principal = "*"
-              Action    = "s3:GetObject"
-              Resource  = "S3-\${aws_s3_bucket.website.arn}/*"
-            },
-          ]
-        })
-      }
+
 
 
       
@@ -528,6 +517,7 @@
 
 
     resource "aws_s3_object" "index_html" {
+      depends_on   = [aws_s3_bucket_public_access_block.website]
       bucket       = aws_s3_bucket.website.id
       key          = "index.html"
       content_type = "text/html"
@@ -537,11 +527,22 @@
     }
     
     resource "aws_s3_object" "auth_js" {
+      depends_on   = [aws_s3_bucket_public_access_block.website]
       bucket       = aws_s3_bucket.website.id
       key          = "auth.js"
       content_type = "application/javascript"
       content      = local.auth_js_content
       etag         = md5(local.auth_js_content)
+      acl          = "public-read"
+    }  
+
+    resource "aws_s3_object" "openapi_yaml" {
+      depends_on   = [aws_s3_bucket_public_access_block.website]
+      bucket       = aws_s3_bucket.website.id
+      key          = "openapi.yaml"
+      content_type = "application/x-yaml"
+      content      = local.openapi_yaml_content
+      etag         = md5(local.openapi_yaml_content)
       acl          = "public-read"
     }  
 
