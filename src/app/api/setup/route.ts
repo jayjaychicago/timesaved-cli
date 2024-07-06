@@ -148,12 +148,39 @@ export async function POST(req: NextRequest) {
       
       console.log('Terraform apply completed successfully.');
       console.log('Full Terraform apply output:', applyOutput);
+
+
+
+      console.log('Retrieving Terraform outputs...');
+      const outputProcess = spawn('terraform', ['output', '-json'], { cwd: tempDir });
+      
+      let outputJson = '';
+      
+      outputProcess.stdout.on('data', (data: Buffer) => {
+        outputJson += data.toString();
+      });
+      
+      const outputExitCode = await new Promise<number>((resolve) => {
+        outputProcess.on('close', resolve);
+      });
+      
+      if (outputExitCode !== 0) {
+        throw new Error('Failed to retrieve Terraform outputs');
+      }
+      
+      const terraformOutputs = JSON.parse(outputJson);
+
+
+
       // Clean up
       console.log('Cleaning up temporary directory...');
      fs.rmSync(tempDir, { recursive: true, force: true });
 
       console.log('Terraform execution completed successfully.');
-      return NextResponse.json({ output: 'Terraform execution completed successfully.' });
+      return NextResponse.json({ 
+        message: 'Terraform execution completed successfully.',
+        outputs: terraformOutputs
+      });
     
     } catch (error) {
       console.error('Terraform execution error:', error);
@@ -786,6 +813,10 @@ EOF
     
     output "cognito_app_client_id" {
       value = aws_cognito_user_pool_client.main.id
+    }
+
+    output "s3_bucket_website_endpoint" {
+      value = "https://\${aws_s3_bucket.website.bucket}.s3-${awsCredentials.region}.amazonaws.com/index.html"
     }
 
     
