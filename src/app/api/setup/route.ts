@@ -544,9 +544,14 @@
       etag         = md5(local.auth_js_content)
       acl          = "public-read"
     }  
+
     resource "aws_api_gateway_rest_api" "api" {
       name = "${apiName}"
+      description = "API Gateway for ${applicationName}"
     }
+
+    
+    
     
     resource "aws_api_gateway_authorizer" "cognito" {
       name          = "cognito-authorizer"
@@ -570,6 +575,18 @@
         }
       }
     }
+
+    resource "aws_lambda_permission" "api_gateway_permission" {
+      statement_id  = "AllowExecutionFromAPIGateway"
+      action        = "lambda:InvokeFunction"
+      function_name = aws_lambda_function.api_lambda.function_name
+      principal     = "apigateway.amazonaws.com"
+    
+      // This source_arn now specifies that any part of the API can invoke the Lambda
+     
+    }
+    
+    
     
     resource "aws_iam_role" "lambda_role" {
       name = "${lambdaFunctionName}-role"
@@ -592,6 +609,7 @@
       policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       role       = aws_iam_role.lambda_role.name
     }
+    
     
     resource "aws_iam_role_policy" "lambda_cognito_policy" {
       name = "${lambdaFunctionName}-cognito-policy"
@@ -707,6 +725,7 @@
     
       depends_on = [aws_api_gateway_integration.${resourceName}_options_${uniqueId}]
     }
+    
     `;
       }
     
@@ -730,6 +749,8 @@
     output "cognito_app_client_id" {
       value = aws_cognito_user_pool_client.main.id
     }
+
+    
     `;
 
     
