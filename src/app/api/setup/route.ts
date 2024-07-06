@@ -33,6 +33,8 @@
         throw new Error('Missing AWS credentials, application name, or OpenAPI specification');
       }
 
+//      console.log('First line of openapi spec:', openApiSpec.split('\n')[0]);
+
       // Read auth.js.tpl and index.html contents
       const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'auth.js.tpl'), 'utf8');
       const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'index.html'), 'utf8');
@@ -52,7 +54,7 @@
       await deleteExistingResources(applicationName);
 
       const spec = yaml.load(openApiSpec);
-      const terraformConfig = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate);
+      const terraformConfig = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec);
       console.log('Terraform configuration completed.');
 
       // Create a temporary directory for Terraform files
@@ -339,11 +341,32 @@
     }
   }
 
-    function generateTerraformConfig(spec: any, awsCredentials: any, applicationName: string, authJsTemplate: string, indexHtmlTemplate: string) {
+  function prepareOpenApiSpec(openApiSpec:string) {
+    // Regex to find existing server URL entries or spot where to insert a new one
+    const serverUrlRegex = /servers:\s*\n\s*- url: ["']([^"']+)["']/;
+    const hasServerUrl = serverUrlRegex.test(openApiSpec);
+  
+    if (hasServerUrl) {
+      // Replace existing URL with a placeholder
+      return openApiSpec.replace(serverUrlRegex, "servers:\n  - url: '{{{api_url}}}'\n");
+    } else {
+      // Insert a new server entry if none exists
+      const insertPosition = openApiSpec.indexOf('paths:');
+      return openApiSpec.slice(0, insertPosition) + "servers:\n  - url: '{{{api_url}}}'\n" + openApiSpec.slice(insertPosition);
+    }
+  }
+  
+  
+
+    function generateTerraformConfig(spec: any, awsCredentials: any, applicationName: string, authJsTemplate: string, indexHtmlTemplate: string, openApiSpec:string) {
       const apiName = applicationName.replace(/\s+/g, '-').toLowerCase();
       const lambdaFunctionName = `${apiName}-lambda`;
       const bucketName = `${apiName}-auth-website`;
       console.log('Resource generation begins.');
+      console.log('First line of openapi spec:', openApiSpec.split('\n')[0]);
+
+      const preparedSpec = prepareOpenApiSpec(openApiSpec);
+
     
 
       let config = `
@@ -388,23 +411,25 @@
       }
     
       locals {
-        index_html_template = <<EOF
-      ${indexHtmlTemplate}
-      EOF
-      
-        auth_js_template = <<EOF
-      ${authJsTemplate}
-      EOF
 
-      openapi_yaml_content = <<EOF
-      ${spec}
-      EOF
+        index_html_template = <<EOF
+${indexHtmlTemplate}
+EOF
+      
+auth_js_template = <<EOF
+${authJsTemplate}
+EOF
+
+      openapi_yaml_content2 = <<-EOF
+${preparedSpec}
+EOF
       
         index_html_content = replace(local.index_html_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
         auth_js_content = replace(
           replace(local.auth_js_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id),
           "{{{client_id}}}", aws_cognito_user_pool_client.main.id
         )
+        openapi_yaml_content = replace(local.openapi_yaml_content2, "{{{api_url}}}", aws_api_gateway_deployment.api_deployment.invoke_url)
       }
       
       
@@ -537,8 +562,8 @@
     }  
 
     resource "aws_s3_object" "openapi_yaml" {
-      depends_on   = [aws_s3_bucket_public_access_block.website]
-      bucket       = aws_s3_bucket.website.id
+      depends_on   = [aws_s3_bucket_public_access_block.website, aws_api_gateway_deployment.api_deployment]
+      bucket       = "${bucketName}"
       key          = "openapi.yaml"
       content_type = "application/x-yaml"
       content      = local.openapi_yaml_content

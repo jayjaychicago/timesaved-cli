@@ -42,8 +42,10 @@
     <script>
         // Initialize Swagger UI on your API specification
         window.onload = function() {
+            const baseUrl = window.location.origin;
+            const token = localStorage.getItem('idToken');
           const ui = SwaggerUIBundle({
-            url: "path_to_your_openapi.yaml", // You can also use a JSON object directly
+            url: baseUrl + "/openapi.yaml", // You can also use a JSON object directly
             dom_id: '#swagger-ui',
             deepLinking: true,
             presets: [
