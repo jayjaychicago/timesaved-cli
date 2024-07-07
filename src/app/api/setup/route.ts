@@ -385,7 +385,7 @@ async function deleteExistingResources(applicationName: string): Promise<void> {
 }
 
 
-  export async function generateTerraformScript(tempDir:string): Promise<string> {
+   async function generateTerraformScript(tempDir:string): Promise<string> {
   const scriptContent = `
 #!/bin/bash
 
@@ -443,7 +443,7 @@ try {
 }
 
 
-export async function generateAwsCleanupScript(applicationName: string, tempDir: string): Promise<string> {
+ async function generateAwsCleanupScript(applicationName: string, tempDir: string): Promise<string> {
   const scriptContent = `#!/bin/bash
 
 # Function to delete existing AWS resources
