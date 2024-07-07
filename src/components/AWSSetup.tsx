@@ -68,7 +68,9 @@ const AWSSetup = () => {
   return (
     <div className="max-w-2xl mx-auto p-4">
       <h1 className="text-2xl font-bold">Setup an API with Token Authentication and dev Portal</h1>
-      <a style={{color:"blue", fontSize:"12px"}} href="https://github.com/jayjaychicago/timesaved-cli">GitHub link</a>
+      <a style={{color:"blue", fontSize:"12px", marginRight:"5px"}} href="https://github.com/jayjaychicago/timesaved-cli">GitHub link</a>
+      -
+      <a style={{color:"blue", marginLeft:"5px", fontSize:"12px"}} href="https://timesaved.vercel.app/">Fully hosted version</a>
 
       <form onSubmit={handleSubmit} className="space-y-4" style={{marginTop:"20px"}}>
         <div>
