@@ -850,7 +850,9 @@ EOF
       value = "https://\${aws_s3_bucket.website.bucket}.s3-${awsCredentials.region}.amazonaws.com/index.html"
     }
 
-    
+    output "lambda_function_name" {
+      value = aws_lambda_function.api_lambda.function_name
+    }   
     `;
 
     
