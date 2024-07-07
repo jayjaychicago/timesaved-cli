@@ -39,13 +39,24 @@ interface RequestBody {
 
 export async function POST(req: NextRequest) {
   try {
+    // delete terraform.zip from public folder
+    const terraformZipPath = path.join(process.cwd(), 'public', 'terraform.zip');
+    if (fs.existsSync(terraformZipPath)) {
+      fs.rmSync(terraformZipPath);
+    }
+    console.log("terraform.zip deleted")
+  } catch (error) {
+    console.error('Error deleting terraform.zip:', error);
+  }
+
+  try {
     const body: RequestBody = await req.json();
     const { awsCredentials, applicationName, openApiSpec } = body;
     
     if (!awsCredentials || !applicationName || !openApiSpec) {
       throw new Error('Missing AWS credentials, application name, or OpenAPI specification');
     }
-
+    console.log('API route called with application name:', applicationName);
     // Read auth.js.tpl and index.html contents
     const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'auth.js.tpl'), 'utf8');
     const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'index.html'), 'utf8');
