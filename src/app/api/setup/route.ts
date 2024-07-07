@@ -51,13 +51,22 @@ export async function POST(req: NextRequest) {
     // Read auth.js.tpl and index.html contents
     const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'public/auth_website', 'auth.js.tpl'), 'utf8');
     const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'public/auth_website', 'index.html'), 'utf8');
-    
+    var lambdaFunctionTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'lambda_function.mjs'), 'utf8');
+
+    const spec = yaml.load(openApiSpec) as any;
     // Configure AWS SDK
     AWS.config.update(awsCredentials);
 
-    const spec = yaml.load(openApiSpec) as any;
-    const terraformConfig = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec);
+    // do the next two lines in one line
+    const [terraformConfig, updatedLambdaFunctionTemplate] = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec, lambdaFunctionTemplate);
+    lambdaFunctionTemplate = updatedLambdaFunctionTemplate;
+
     console.log('Terraform configuration completed.');
+
+    const zip0 = new AdmZip();
+    zip0.addFile('lambda_function.mjs', Buffer.from(lambdaFunctionTemplate));
+    // Get zip buffer and convert to Base64
+    const zipBuffer0 = zip0.toBuffer();
 
     // Create in-memory zip file
     const zip = new AdmZip();
@@ -65,7 +74,7 @@ export async function POST(req: NextRequest) {
     // Add files to the zip
     zip.addFile('auth.js.tpl', Buffer.from(authJsTemplate));
     zip.addFile('index.html', Buffer.from(indexHtmlTemplate));
-    zip.addFile('lambda_function.mjs', Buffer.from(`// Content of lambda_function.mjs`));
+    zip.addFile('lambda_function.zip', Buffer.from(zipBuffer0));
     zip.addFile(`${applicationName}.tf`, Buffer.from(terraformConfig));
 
     // Generate and add cleanup script
@@ -428,7 +437,7 @@ delete_existing_resources "${applicationName}"
   
   
 
-    function generateTerraformConfig(spec: any, awsCredentials: any, applicationName: string, authJsTemplate: string, indexHtmlTemplate: string, openApiSpec:string) {
+    function generateTerraformConfig(spec: any, awsCredentials: any, applicationName: string, authJsTemplate: string, indexHtmlTemplate: string, openApiSpec:string, lambdaFunctionTemplate:string) {
       const apiName = applicationName.replace(/\s+/g, '-').toLowerCase();
       const lambdaFunctionName = `${apiName}-lambda`;
       const bucketName = `${apiName}-auth-website`;
@@ -436,6 +445,8 @@ delete_existing_resources "${applicationName}"
       console.log('First line of openapi spec:', openApiSpec.split('\n')[0]);
 
       const preparedSpec = prepareOpenApiSpec(openApiSpec);
+
+      var lambda_placeholder_replacement = '';
 
     
 
@@ -747,6 +758,16 @@ EOF
           if (method.toLowerCase() !== 'options') {
             const integrationResourceName = `${resourceName}_${method.toLowerCase()}_${uniqueId}`;
             dependsOnList.push(`aws_api_gateway_integration.${integrationResourceName}`);
+            lambda_placeholder_replacement += `
+                 if (event.httpMethod === '${method.toUpperCase()}' && event.resource === '${path}') {
+                  // Add your code here
+                  return {
+                    statusCode: 200,
+                    body: JSON.stringify({
+                      message: 'Your ${method.toUpperCase()} method on ${path} works!'
+                    })
+                  };
+            `;
     
             config += `
     resource "aws_api_gateway_method" "${integrationResourceName}" {
@@ -855,6 +876,9 @@ EOF
     }   
     `;
 
+      // Replace the placeholder in the lambda function template with the actual code
+      console.log('Lambda placeholder replacement:', lambda_placeholder_replacement)
+      lambdaFunctionTemplate = lambdaFunctionTemplate.replace('// PLACEHOLDER_API_ROUTES_HANDLER', lambda_placeholder_replacement);
     
-      return config;
+      return [config, lambdaFunctionTemplate];
     }
