@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
       await generateTerraformScript(tempDir);
       const zip2 = new AdmZip();
       zip2.addLocalFolder(tempDir);
-      zip2.writeZip(path.join(process.cwd(), 'tmp/terraform', 'terraform.zip'));
+      zip2.writeZip(path.join('tmp/terraform', 'terraform.zip'));
 
 
     } catch (error) {
