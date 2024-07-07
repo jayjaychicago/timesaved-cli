@@ -1,11 +1,10 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
-
 
 const AWSSetup = () => {
   const [awsCredentials, setAwsCredentials] = useState({
@@ -33,7 +32,6 @@ const AWSSetup = () => {
     setLogs([]);
     setResults(null);
     setIsLoading(true);
-
 
     try {
       log('Submitting with application name: ' + applicationName);
@@ -64,6 +62,28 @@ const AWSSetup = () => {
       setIsLoading(false);
     }
   };
+
+  const handleDownload = useCallback(() => {
+    if (results && results.zipFileContent) {
+      const zipContent = atob(results.zipFileContent);
+      const zipArray = new Uint8Array(zipContent.length);
+      for (let i = 0; i < zipContent.length; i++) {
+        zipArray[i] = zipContent.charCodeAt(i);
+      }
+      const zipBlob = new Blob([zipArray], { type: 'application/zip' });
+
+      const downloadUrl = URL.createObjectURL(zipBlob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = downloadUrl;
+      downloadLink.download = results.filename || 'terraform.zip';
+      
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+
+      URL.revokeObjectURL(downloadUrl);
+    }
+  }, [results]);
 
   return (
     <div className="max-w-2xl mx-auto p-4">
@@ -112,12 +132,14 @@ const AWSSetup = () => {
         <div className="mt-4">
           <h2 className="text-xl font-semibold mb-2">Results:</h2>
           <div className="bg-gray-100 p-4 rounded overflow-x-auto">
-            <p><strong>Terraform script:</strong> <a
-            href="/tmp/terraform.zip"
-            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded ml-2"
-          >
-            Download Terraform Script
-          </a></p>
+            <p><strong>Terraform script:</strong> 
+              <Button
+                onClick={handleDownload}
+                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded ml-2"
+              >
+                Download Terraform Script
+              </Button>
+            </p>
           </div>
         </div>
       )}

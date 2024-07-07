@@ -39,192 +39,58 @@ interface RequestBody {
 
 export async function POST(req: NextRequest) {
   try {
-    // delete terraform.zip from public folder
-    const terraformZipPath = path.join(process.cwd(), 'tmp/terraform', 'terraform.zip');
-    if (fs.existsSync(terraformZipPath)) {
-      fs.rmSync(terraformZipPath);
-    }
-    console.log("terraform.zip deleted")
-  } catch (error) {
-    console.error('Error deleting terraform.zip:', error);
-  }
-
-  try {
     const body: RequestBody = await req.json();
     const { awsCredentials, applicationName, openApiSpec } = body;
     
     if (!awsCredentials || !applicationName || !openApiSpec) {
       throw new Error('Missing AWS credentials, application name, or OpenAPI specification');
     }
+
     console.log('API route called with application name:', applicationName);
+
     // Read auth.js.tpl and index.html contents
-    const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'tmp/terraform', 'auth_website', 'auth.js.tpl'), 'utf8');
-    const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'tmp/terraform', 'auth_website', 'index.html'), 'utf8');
+    const authJsTemplate = `// Content of auth.js.tpl`;
+    const indexHtmlTemplate = `<!-- Content of index.html -->`;
     
     // Configure AWS SDK
-    AWS.config.update({
-      accessKeyId: awsCredentials.accessKeyId,
-      secretAccessKey: awsCredentials.secretAccessKey,
-      region: awsCredentials.region
-    });
-
-    const cognito = new AWS.CognitoIdentityServiceProvider({
-      apiVersion: '2016-04-18'
-    });
-
-    // Delete existing resources
-    //await deleteExistingResources(applicationName);
+    AWS.config.update(awsCredentials);
 
     const spec = yaml.load(openApiSpec) as any;
     const terraformConfig = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec);
     console.log('Terraform configuration completed.');
 
-    // Create a temporary directory for Terraform files
-    const tempDir = `/tmp/terraform-${applicationName}`;
+    // Create in-memory zip file
+    const zip = new AdmZip();
+
+    // Add files to the zip
+    zip.addFile('auth.js.tpl', Buffer.from(authJsTemplate));
+    zip.addFile('index.html', Buffer.from(indexHtmlTemplate));
+    zip.addFile('lambda_function.mjs', Buffer.from(`// Content of lambda_function.mjs`));
+    zip.addFile(`${applicationName}.tf`, Buffer.from(terraformConfig));
+
+    // Generate and add cleanup script
+    const cleanupScript = generateAwsCleanupScript(applicationName);
+    zip.addFile('delete.sh', Buffer.from(cleanupScript));
+
+    // Generate and add Terraform script
+    const terraformScript = generateTerraformScript();
+    zip.addFile('terraform.sh', Buffer.from(terraformScript));
+
+    // Get zip buffer and convert to Base64
+    const zipBuffer = zip.toBuffer();
+    const base64Zip = zipBuffer.toString('base64');
+
+    console.log('Terraform execution completed successfully.');
     
-
-    try {
-      fs.mkdirSync(tempDir, { recursive: true });
-      fs.mkdirSync('tmp/terraform', { recursive: true });
-   
-
-      // Write files to the temporary directory
-      fs.writeFileSync(path.join(tempDir, 'auth.js.tpl'), authJsTemplate);
-      fs.writeFileSync(path.join(tempDir, 'index.html'), indexHtmlTemplate);
-      fs.writeFileSync(path.join(tempDir, 'lambda_function.mjs'), fs.readFileSync(path.join(process.cwd(), 'src', 'lambda_function.mjs'), 'utf8'));
- 
-      // Create zip files
-      const zip = new AdmZip();
-      zip.addLocalFile(path.join(tempDir, 'lambda_function.mjs'));
-      zip.writeZip(path.join(tempDir, 'lambda_function.zip'));
-
-
-      // Write Terraform configuration to a file
-      fs.writeFileSync(path.join(tempDir, applicationName + '.tf'), terraformConfig);
-      
-      // zip all tempDir and copy to /tmp/terraform
-      await generateAwsCleanupScript(applicationName, tempDir);
-      await generateTerraformScript(tempDir);
-      const zip2 = new AdmZip();
-      zip2.addLocalFolder(tempDir);
-      zip2.writeZip(path.join('tmp/terraform', 'terraform.zip'));
-
-
-    } catch (error) {
-      console.error('Error creating temporary directory or writing files:', error);
-    } finally {
-      console.log('Terraform tempdir completed.');
-    }
-
-    // Run Terraform commands
-    
-    try {
-      /*
-      console.log('Starting Terraform initialization...');
-      const initOutput = await execWithTimeout('terraform init', tempDir, 60000);
-      console.log('Terraform initialization output:', initOutput);
-
-      console.log('Starting Terraform plan...');
-      const planOutput = await execWithTimeout('terraform plan -out=tfplan', tempDir, 300000);
-      console.log('Terraform plan output:', planOutput);
-
-      console.log('Terraform plan contents:');
-      const planContents = await execWithTimeout('terraform show tfplan', tempDir, 60000);
-      console.log(planContents);
-
-      console.log('Starting Terraform apply...');
-      const applyProcess = spawn('terraform', ['apply', '-auto-approve'], { cwd: tempDir });
-      
-      let applyOutput = '';
-      let applyError = '';
-      
-      applyProcess.stdout.on('data', (data: Buffer) => {
-        const output = data.toString();
-        applyOutput += output;
-        console.log(`Terraform apply output: ${output}`);
-      });
-      
-      applyProcess.stderr.on('data', (data: Buffer) => {
-        const error = data.toString();
-        applyError += error;
-        console.error(`Terraform apply error: ${error}`);
-      });
-      
-      const applyExitCode = await new Promise<number>((resolve) => {
-        applyProcess.on('close', resolve);
-      });
-      
-      if (applyExitCode !== 0) {
-        console.error('Full Terraform apply output:', applyOutput);
-        console.error('Full Terraform apply error:', applyError);
-        throw new Error(`Terraform apply failed with exit code ${applyExitCode}`);
+    // Return JSON response with Base64 encoded ZIP
+    return NextResponse.json({
+      message: 'Terraform execution completed successfully.',
+      outputs: {
+        zipFileContent: base64Zip,
+        filename: `terraform-${applicationName}.zip`
       }
-      
-      console.log('Terraform apply completed successfully.');
-      console.log('Full Terraform apply output:', applyOutput);
-
-
-
-      console.log('Retrieving Terraform outputs...');
-      const outputProcess = spawn('terraform', ['output', '-json'], { cwd: tempDir });
-      
-      let outputJson = '';
-      
-      outputProcess.stdout.on('data', (data: Buffer) => {
-        outputJson += data.toString();
-      });
-      
-      const outputExitCode = await new Promise<number>((resolve) => {
-        outputProcess.on('close', resolve);
-      });
-      
-      if (outputExitCode !== 0) {
-        throw new Error('Failed to retrieve Terraform outputs');
-      }
-      */
-     const outputJson = '{"terraform_scripts":"/tmp/terraform/terraform.zip", "delete_script":"/tmp/terraform/delete.sh"}';
-
-     const terraformOutputs = JSON.parse(outputJson);
-
-      
-
-      // Clean up
-      console.log('Cleaning up temporary directory...');
-     fs.rmSync(tempDir, { recursive: true, force: true });
-
-      console.log('Terraform execution completed successfully.');
-      return NextResponse.json({ 
-        message: 'Terraform execution completed successfully.',
-        outputs: terraformOutputs
-      });
-    
-    } catch (error) {
-      console.error('Terraform execution error:', error);
-      
-      // Log the contents of the Terraform directory
-      console.log('Contents of Terraform directory:');
-      const dirContents = fs.readdirSync(tempDir);
-
-      // If there's a terraform.tfstate file, log its contents
-      const tfstatePath = path.join(tempDir, 'terraform.tfstate');
-      if (fs.existsSync(tfstatePath)) {
-        console.log('Contents of terraform.tfstate:');
-        const tfstate = fs.readFileSync(tfstatePath, 'utf8');
-      }
-
-      // If there's a terraform.tfstate.backup file, log its contents
-      const tfstateBackupPath = path.join(tempDir, 'terraform.tfstate.backup');
-      if (fs.existsSync(tfstateBackupPath)) {
-        console.log('Contents of terraform.tfstate.backup:');
-        const tfstateBackup = fs.readFileSync(tfstateBackupPath, 'utf8');
-      }
-
-      // Clean up
-      console.log('Cleaning up temporary directory after error...', tempDir);
-      fs.rmSync(tempDir, { recursive: true, force: true });
-      
-      return NextResponse.json({ error: `Terraform execution failed: ${(error as Error).message}` }, { status: 500 });
-    }
+    });
+  
   } catch (error) {
     console.error('API route error:', error);
     if (error instanceof Error) {
@@ -396,9 +262,8 @@ async function deleteExistingResources(applicationName: string): Promise<void> {
   console.log('Resource deletion process completed successfully.');
 }
 
-
-   async function generateTerraformScript(tempDir:string): Promise<string> {
-  const scriptContent = `
+function generateTerraformScript(): string {
+  return `
 #!/bin/bash
 
 # Prompt for AWS credentials and region if not provided as arguments
@@ -440,23 +305,10 @@ terraform plan -out=tfplan
 terraform show tfplan
 terraform apply -auto-approve
 `;
-
-const fileName = `terraform.sh`;
-const filePath = tempDir + '/' + fileName;
-
-try {
-  await fs.promises.writeFile(filePath, scriptContent, 'utf8');
-  console.log(`Script file created successfully: ${filePath}`);
-  return fileName;
-} catch (error) {
-  console.error('Error writing script file:', error);
-  throw error;
-}
 }
 
-
- async function generateAwsCleanupScript(applicationName: string, tempDir: string): Promise<string> {
-  const scriptContent = `#!/bin/bash
+function generateAwsCleanupScript(applicationName: string): string {
+  return `#!/bin/bash
 
 # Function to delete existing AWS resources
 delete_existing_resources() {
@@ -531,18 +383,6 @@ delete_existing_resources() {
 # Call the function with the provided application name
 delete_existing_resources "${applicationName}"
 `;
-
-  const fileName = `delete.sh`;
-  const filePath = tempDir + '/' + fileName;
-
-  try {
-    await fs.promises.writeFile(filePath, scriptContent, 'utf8');
-    console.log(`Script file created successfully: ${filePath}`);
-    return fileName;
-  } catch (error) {
-    console.error('Error writing script file:', error);
-    throw error;
-  }
 }
 
   function prepareOpenApiSpec(openApiSpec:string) {
