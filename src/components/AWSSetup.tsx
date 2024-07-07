@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
-import Link from 'next/link';
+
 
 const AWSSetup = () => {
   const [awsCredentials, setAwsCredentials] = useState({
@@ -67,10 +67,10 @@ const AWSSetup = () => {
 
   return (
     <div className="max-w-2xl mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">AWS API Gateway Setup</h1>
+      <h1 className="text-2xl font-bold mb-4">Setup an API with Token Authentication and dev Portal</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block mb-1">Application Name:</label>
+          <label className="block mb-1">Your API Name:</label>
           <Input
             type="text"
             value={applicationName}
@@ -95,7 +95,7 @@ const AWSSetup = () => {
               Processing...
             </>
           ) : (
-            'Generate and Apply Terraform'
+            'Generate a Terraform script'
           )}
         </Button>
       </form>
@@ -108,7 +108,12 @@ const AWSSetup = () => {
         <div className="mt-4">
           <h2 className="text-xl font-semibold mb-2">Results:</h2>
           <div className="bg-gray-100 p-4 rounded overflow-x-auto">
-            <p><strong>Terraform script:</strong> <Link href="/terraform.zip">terraform.zip</Link></p>
+            <p><strong>Terraform script:</strong> <a
+            href="/terraform.zip"
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded ml-2"
+          >
+            Download Terraform Script
+          </a></p>
           </div>
         </div>
       )}
