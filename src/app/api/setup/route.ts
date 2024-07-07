@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import AdmZip from 'adm-zip';
 import { v4 as uuidv4 } from 'uuid';
+import { tmpdir } from 'os';
 
 function execWithTimeout(command: string, cwd: string, timeout: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Delete existing resources
-    await deleteExistingResources(applicationName);
+    //await deleteExistingResources(applicationName);
 
     const spec = yaml.load(openApiSpec) as any;
     const terraformConfig = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec);
@@ -79,24 +80,23 @@ export async function POST(req: NextRequest) {
       fs.writeFileSync(path.join(tempDir, 'auth.js.tpl'), authJsTemplate);
       fs.writeFileSync(path.join(tempDir, 'index.html'), indexHtmlTemplate);
       fs.writeFileSync(path.join(tempDir, 'lambda_function.mjs'), fs.readFileSync(path.join(process.cwd(), 'src', 'lambda_function.mjs'), 'utf8'));
-      fs.writeFileSync(path.join(tempDir, 'html_lambda.js'), fs.readFileSync(path.join(process.cwd(), 'src', 'html_lambda.js'), 'utf8'));
-      fs.writeFileSync(path.join(tempDir, 'token_lambda.js'), fs.readFileSync(path.join(process.cwd(), 'src', 'token_lambda.js'), 'utf8'));
-
+ 
       // Create zip files
       const zip = new AdmZip();
       zip.addLocalFile(path.join(tempDir, 'lambda_function.mjs'));
       zip.writeZip(path.join(tempDir, 'lambda_function.zip'));
 
-      const zip2 = new AdmZip();
-      zip2.addLocalFile(path.join(tempDir, 'html_lambda.js'));
-      zip2.writeZip(path.join(tempDir, 'html_lambda.zip'));
-
-      const zip3 = new AdmZip();
-      zip3.addLocalFile(path.join(tempDir, 'token_lambda.js'));
-      zip3.writeZip(path.join(tempDir, 'token_lambda.zip'));
 
       // Write Terraform configuration to a file
-      fs.writeFileSync(path.join(tempDir, 'main.tf'), terraformConfig);
+      fs.writeFileSync(path.join(tempDir, applicationName + '.tf'), terraformConfig);
+      
+      // zip all tempDir and copy to /public
+      await generateAwsCleanupScript(applicationName, tempDir);
+      await generateTerraformScript(tempDir);
+      const zip2 = new AdmZip();
+      zip2.addLocalFolder(tempDir);
+      zip2.writeZip(path.join(process.cwd(), 'public', 'terraform.zip'));
+
 
     } catch (error) {
       console.error('Error creating temporary directory or writing files:', error);
@@ -105,7 +105,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Run Terraform commands
+    
     try {
+      /*
       console.log('Starting Terraform initialization...');
       const initOutput = await execWithTimeout('terraform init', tempDir, 60000);
       console.log('Terraform initialization output:', initOutput);
@@ -167,10 +169,12 @@ export async function POST(req: NextRequest) {
       if (outputExitCode !== 0) {
         throw new Error('Failed to retrieve Terraform outputs');
       }
+      */
+     const outputJson = '{"terraform_scripts":"/public/terraform.zip", "delete_script":"/public/delete.sh"}';
+
+     const terraformOutputs = JSON.parse(outputJson);
+
       
-      const terraformOutputs = JSON.parse(outputJson);
-
-
 
       // Clean up
       console.log('Cleaning up temporary directory...');
@@ -378,6 +382,155 @@ async function deleteExistingResources(applicationName: string): Promise<void> {
   );
 
   console.log('Resource deletion process completed successfully.');
+}
+
+
+  export async function generateTerraformScript(tempDir:string): Promise<string> {
+  const scriptContent = `
+#!/bin/bash
+
+# Prompt for AWS credentials and region if not provided as arguments
+ACCESS_KEY_ID="\${1}"
+SECRET_ACCESS_KEY="\${2}"
+REGION="\${3}"
+
+if [ -z "\${ACCESS_KEY_ID}" ]; then
+  read -p "Enter your AWS Access Key ID: " ACCESS_KEY_ID
+fi
+if [ -z "\${SECRET_ACCESS_KEY}" ]; then
+  read -p "Enter your AWS Secret Access Key: " SECRET_ACCESS_KEY
+fi
+if [ -z "\${REGION}" ]; then
+  read -p "Enter your AWS Region: " REGION
+fi
+
+# Find the .tf file in the current directory
+TF_FILE=$(find . -maxdepth 1 -name "*.tf" | head -n 1)
+
+if [ -z "$TF_FILE" ]; then
+  echo "No .tf file found in the current directory."
+  exit 1
+fi
+
+# Function to escape only the '/' character
+escape_slash() {
+  echo "$1" | sed 's/\//\\\//g'
+}
+
+awk -v access_key="$ACCESS_KEY_ID" \
+    -v secret_key="$SECRET_ACCESS_KEY" \
+    -v region="$REGION" \
+    '{gsub(/ACCESS_KEY_ID_PLACEHOLDER/, access_key); gsub(/SECRET_ACCESS_KEY_PLACEHOLDER/, secret_key); gsub(/REGION_PLACEHOLDER/, region)}1' "$TF_FILE" > "$TF_FILE.tmp" && mv "$TF_FILE.tmp" "$TF_FILE"
+
+# Initialize, plan and apply Terraform
+terraform init
+terraform plan -out=tfplan
+terraform show tfplan
+terraform apply -auto-approve
+`;
+
+const fileName = `terraform.sh`;
+const filePath = tempDir + '/' + fileName;
+
+try {
+  await fs.promises.writeFile(filePath, scriptContent, 'utf8');
+  console.log(`Script file created successfully: ${filePath}`);
+  return fileName;
+} catch (error) {
+  console.error('Error writing script file:', error);
+  throw error;
+}
+}
+
+
+export async function generateAwsCleanupScript(applicationName: string, tempDir: string): Promise<string> {
+  const scriptContent = `#!/bin/bash
+
+# Function to delete existing AWS resources
+delete_existing_resources() {
+    local application_name="$1"
+    local lambda_function_name="\${application_name}-lambda"
+    local role_name="\${lambda_function_name}-role"
+    local user_pool_name="\${application_name}-user-pool"
+    local bucket_name=$(echo "\${application_name}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g')-auth-website
+
+    echo "Starting resource deletion process..."
+
+    # Delete CloudFront distribution
+    echo "Deleting CloudFront distribution..."
+    distribution_id=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='\${application_name}'].Id" --output text)
+    if [ -n "$distribution_id" ]; then
+        etag=$(aws cloudfront get-distribution --id "$distribution_id" --query 'ETag' --output text)
+        aws cloudfront delete-distribution --id "$distribution_id" --if-match "$etag"
+        echo "Deleted CloudFront distribution: $distribution_id"
+    else
+        echo "CloudFront distribution not found for application: \${application_name}"
+    fi
+
+    # Delete Lambda function
+    echo "Deleting Lambda function..."
+    aws lambda delete-function --function-name "$lambda_function_name" || echo "Lambda function \${lambda_function_name} not found or already deleted"
+
+    # Delete API Gateway
+    echo "Deleting API Gateway..."
+    api_id=$(aws apigateway get-rest-apis --query "items[?name=='\${application_name}'].id" --output text)
+    if [ -n "$api_id" ]; then
+        aws apigateway delete-rest-api --rest-api-id "$api_id"
+        echo "Deleted API Gateway: \${application_name}"
+    fi
+
+    # Delete IAM role
+    echo "Deleting IAM role..."
+    attached_policies=$(aws iam list-attached-role-policies --role-name "$role_name" --query 'AttachedPolicies[*].PolicyArn' --output text)
+    for policy in $attached_policies; do
+        aws iam detach-role-policy --role-name "$role_name" --policy-arn "$policy"
+        echo "Detached policy $policy from role $role_name"
+    done
+
+    inline_policies=$(aws iam list-role-policies --role-name "$role_name" --query 'PolicyNames' --output text)
+    for policy in $inline_policies; do
+        aws iam delete-role-policy --role-name "$role_name" --policy-name "$policy"
+        echo "Deleted inline policy $policy from role $role_name"
+    done
+
+    aws iam delete-role --role-name "$role_name" || echo "Error deleting IAM role \${role_name}"
+
+    # Delete Cognito User Pool
+    echo "Deleting Cognito User Pool..."
+    user_pool_id=$(aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?Name=='\${user_pool_name}'].Id" --output text)
+    if [ -n "$user_pool_id" ]; then
+        aws cognito-idp delete-user-pool --user-pool-id "$user_pool_id"
+        echo "Deleted Cognito User Pool: \${user_pool_name}"
+    fi
+
+    # Delete S3 bucket
+    echo "Deleting S3 bucket..."
+    if aws s3api head-bucket --bucket "$bucket_name" 2>/dev/null; then
+        aws s3 rm "s3://\${bucket_name}" --recursive
+        aws s3 rb "s3://\${bucket_name}" --force
+        echo "Deleted S3 bucket: \${bucket_name}"
+    else
+        echo "S3 bucket \${bucket_name} not found or already deleted"
+    fi
+
+    echo "Resource deletion process completed successfully."
+}
+
+# Call the function with the provided application name
+delete_existing_resources "${applicationName}"
+`;
+
+  const fileName = `delete.sh`;
+  const filePath = tempDir + '/' + fileName;
+
+  try {
+    await fs.promises.writeFile(filePath, scriptContent, 'utf8');
+    console.log(`Script file created successfully: ${filePath}`);
+    return fileName;
+  } catch (error) {
+    console.error('Error writing script file:', error);
+    throw error;
+  }
 }
 
   function prepareOpenApiSpec(openApiSpec:string) {

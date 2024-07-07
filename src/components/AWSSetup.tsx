@@ -5,12 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
+import Link from 'next/link';
 
 const AWSSetup = () => {
   const [awsCredentials, setAwsCredentials] = useState({
-    accessKeyId: '',
-    secretAccessKey: '',
-    region: ''
+    accessKeyId: 'ACCESS_KEY_ID_PLACEHOLDER',
+    secretAccessKey: 'SECRET_ACCESS_KEY_PLACEHOLDER',
+    region: 'REGION_PLACEHOLDER'
   });
   const [applicationName, setApplicationName] = useState('');
   const [openApiSpec, setOpenApiSpec] = useState('');
@@ -32,6 +33,7 @@ const AWSSetup = () => {
     setLogs([]);
     setResults(null);
     setIsLoading(true);
+
 
     try {
       log('Submitting with application name: ' + applicationName);
@@ -76,33 +78,7 @@ const AWSSetup = () => {
             required
           />
         </div>
-        <div>
-          <label className="block mb-1">AWS Access Key ID:</label>
-          <Input
-            type="text"
-            value={awsCredentials.accessKeyId}
-            onChange={(e) => setAwsCredentials({...awsCredentials, accessKeyId: e.target.value})}
-            required
-          />
-        </div>
-        <div>
-          <label className="block mb-1">AWS Secret Access Key:</label>
-          <Input
-            type="password"
-            value={awsCredentials.secretAccessKey}
-            onChange={(e) => setAwsCredentials({...awsCredentials, secretAccessKey: e.target.value})}
-            required
-          />
-        </div>
-        <div>
-          <label className="block mb-1">AWS Region:</label>
-          <Input
-            type="text"
-            value={awsCredentials.region}
-            onChange={(e) => setAwsCredentials({...awsCredentials, region: e.target.value})}
-            required
-          />
-        </div>
+        
         <div>
           <label className="block mb-1">OpenAPI Specification (YAML):</label>
           <Textarea
@@ -132,10 +108,7 @@ const AWSSetup = () => {
         <div className="mt-4">
           <h2 className="text-xl font-semibold mb-2">Results:</h2>
           <div className="bg-gray-100 p-4 rounded overflow-x-auto">
-            <p><strong>API URL:</strong> {results.api_url.value}</p>
-            <p><strong>Cognito App Client ID:</strong> {results.cognito_app_client_id.value}</p>
-            <p><strong>Cognito User Pool ID:</strong> {results.cognito_user_pool_id.value}</p>
-            <p><strong>S3 Bucket Website Endpoint:</strong> {results.s3_bucket_website_endpoint.value}</p>
+            <p><strong>Terraform script:</strong> <Link href="/terraform.zip">terraform.zip</Link></p>
           </div>
         </div>
       )}
