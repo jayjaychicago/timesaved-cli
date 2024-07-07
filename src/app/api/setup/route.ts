@@ -40,7 +40,7 @@ interface RequestBody {
 export async function POST(req: NextRequest) {
   try {
     // delete terraform.zip from public folder
-    const terraformZipPath = path.join(process.cwd(), 'public', 'terraform.zip');
+    const terraformZipPath = path.join(process.cwd(), 'tmp/terraform', 'terraform.zip');
     if (fs.existsSync(terraformZipPath)) {
       fs.rmSync(terraformZipPath);
     }
@@ -58,8 +58,8 @@ export async function POST(req: NextRequest) {
     }
     console.log('API route called with application name:', applicationName);
     // Read auth.js.tpl and index.html contents
-    const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'auth.js.tpl'), 'utf8');
-    const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'auth_website', 'index.html'), 'utf8');
+    const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'tmp/terraform', 'auth_website', 'auth.js.tpl'), 'utf8');
+    const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'tmp/terraform', 'auth_website', 'index.html'), 'utf8');
     
     // Configure AWS SDK
     AWS.config.update({
@@ -85,6 +85,7 @@ export async function POST(req: NextRequest) {
 
     try {
       fs.mkdirSync(tempDir, { recursive: true });
+      fs.mkdirSync('tmp/terraform', { recursive: true });
    
 
       // Write files to the temporary directory
@@ -101,12 +102,12 @@ export async function POST(req: NextRequest) {
       // Write Terraform configuration to a file
       fs.writeFileSync(path.join(tempDir, applicationName + '.tf'), terraformConfig);
       
-      // zip all tempDir and copy to /public
+      // zip all tempDir and copy to /tmp/terraform
       await generateAwsCleanupScript(applicationName, tempDir);
       await generateTerraformScript(tempDir);
       const zip2 = new AdmZip();
       zip2.addLocalFolder(tempDir);
-      zip2.writeZip(path.join(process.cwd(), 'public', 'terraform.zip'));
+      zip2.writeZip(path.join(process.cwd(), 'tmp/terraform', 'terraform.zip'));
 
 
     } catch (error) {
@@ -181,7 +182,7 @@ export async function POST(req: NextRequest) {
         throw new Error('Failed to retrieve Terraform outputs');
       }
       */
-     const outputJson = '{"terraform_scripts":"/public/terraform.zip", "delete_script":"/public/delete.sh"}';
+     const outputJson = '{"terraform_scripts":"/tmp/terraform/terraform.zip", "delete_script":"/tmp/terraform/delete.sh"}';
 
      const terraformOutputs = JSON.parse(outputJson);
 

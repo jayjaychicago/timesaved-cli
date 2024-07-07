@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Authentication</title>
+    <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js/dist/amazon-cognito-identity.min.js"></script>
+    <script src="auth.js" defer></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui.css">
+</head>
+<body>
+    <h1>API Authentication</h1>
+    
+    <h2>Sign Up</h2>
+    <form id="signupForm">
+        <input type="text" id="signupUsername" placeholder="Username" required>
+        <input type="email" id="signupEmail" placeholder="Email" required>
+        <input type="password" id="signupPassword" placeholder="Password" required>
+        <button type="submit">Sign Up</button>
+    </form>
+
+    <h2>Confirm Sign Up</h2>
+    <form id="confirmForm">
+        <input type="text" id="confirmUsername" placeholder="Username" required>
+        <input type="text" id="confirmCode" placeholder="Confirmation Code" required>
+        <button type="submit">Confirm</button>
+    </form>
+
+    <h2>Sign In</h2>
+    <form id="signinForm">
+        <input type="text" id="signinUsername" placeholder="Username" required>
+        <input type="password" id="signinPassword" placeholder="Password" required>
+        <button type="submit">Sign In</button>
+    </form>
+
+    <div id="tokenDisplay"></div>
+    <div id="swagger-ui"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui-bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui-standalone-preset.js"></script>
+    <script src="auth.js"></script> <!-- Your existing JavaScript file -->
+    <script>
+        // Initialize Swagger UI on your API specification
+        window.onload = function() {
+            const baseUrl = window.location.origin;
+            const token = localStorage.getItem('idToken');
+          const ui = SwaggerUIBundle({
+            url: baseUrl + "/openapi.yaml", // You can also use a JSON object directly
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            presets: [
+              SwaggerUIBundle.presets.apis,
+              SwaggerUIStandalonePreset
+            ],
+            plugins: [
+              SwaggerUIBundle.plugins.DownloadUrl
+            ],
+            layout: "StandaloneLayout",
+            requestInterceptor: (request) => {
+                // Check if the request is for the S3 bucket
+                if (!request.url.includes(baseUrl)) {
+                    request.headers.Authorization = "Bearer " + token;
+                }
+                return request;
+            }
+          });
+        }
+    </script>
+
+
+</body>
+</html>
