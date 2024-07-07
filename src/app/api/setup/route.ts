@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
     console.log('API route called with application name:', applicationName);
 
     // Read auth.js.tpl and index.html contents
-    const authJsTemplate = `// Content of auth.js.tpl`;
-    const indexHtmlTemplate = `<!-- Content of index.html -->`;
+    const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'public/auth_website', 'auth.js.tpl'), 'utf8');
+    const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'public/auth_website', 'index.html'), 'utf8');
     
     // Configure AWS SDK
     AWS.config.update(awsCredentials);
@@ -75,6 +75,9 @@ export async function POST(req: NextRequest) {
     // Generate and add Terraform script
     const terraformScript = generateTerraformScript();
     zip.addFile('terraform.sh', Buffer.from(terraformScript));
+
+    const readmeContent = readme();
+    zip.addFile('README.md', Buffer.from(readmeContent));
 
     // Get zip buffer and convert to Base64
     const zipBuffer = zip.toBuffer();
@@ -261,6 +264,29 @@ async function deleteExistingResources(applicationName: string): Promise<void> {
 
   console.log('Resource deletion process completed successfully.');
 }
+
+function readme(): string {
+  return `
+  In order to create your API and API dev Portal, the scripts in this folder will:
+  * Create an AWS API Gateway to handle your API traffic
+  * Create an AWS Cognito User Pool for user authentication using login and password to produce an API bearer token
+  * Create an AWS Lambda function to handle API requests
+  * Create an S3 bucket to host your API documentation and authentication website
+  * Create a CloudFront distribution to serve your website over HTTPS
+  
+  In order to proceed, all you need to do is run in this folder:
+  chmod +x terraform.sh delete.sh
+  ./terraform.sh <AWS_ACCESS_KEY_ID> <AWS_SECRET_ACCESS> <AWS_REGION> in order to create all the resources described above
+  ./delete.shin order to delete all the resources created by the terraform script
+  
+  The terraform script will:
+  * Create all the AWS resources you need
+  * Output the URL of your API Gateway so that you can begin using your API
+  * Output the URL of your authentication website so that you can obtain an API bearer token to use your API
+  * Output the name of the lambda function that you will need to modify in order to implement your API
+
+  `}
+
 
 function generateTerraformScript(): string {
   return `
