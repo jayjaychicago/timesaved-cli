@@ -113,7 +113,7 @@ const AWSSetup = () => {
           <h2 className="text-xl font-semibold mb-2">Results:</h2>
           <div className="bg-gray-100 p-4 rounded overflow-x-auto">
             <p><strong>Terraform script:</strong> <a
-            href="/terraform.zip"
+            href="/tmp/terraform.zip"
             className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded ml-2"
           >
             Download Terraform Script
