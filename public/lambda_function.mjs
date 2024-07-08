@@ -51,8 +51,7 @@ export const handler = async (event) => {
     console.error('Error:', error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: 'Internal server error' }),
-      cognitoInfo
+      body: JSON.stringify({ error: 'Internal server error' })
     };
   } finally {
     console.log('Lambda function executed');
