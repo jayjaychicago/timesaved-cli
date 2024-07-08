@@ -371,7 +371,7 @@ DEV_PORTAL_URL=$(terraform output -raw s3_bucket_website_endpoint)
 USER_POOL_ID=$(terraform output -raw user_pool_id)
 CLIENT_ID=$(terraform output -raw user_pool_client_id)
 ADMIN_PASSWORD=$(terraform output -raw admin_password)
-TESTUSER_PASSWORD=$(terraform output -raw testuser_password)
+TESTUSER_PASSWORD=$(terraform output -raw testuser_password) 
 
 get_id_token() {
   local username=$1
