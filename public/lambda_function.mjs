@@ -1,12 +1,13 @@
 
 
 export const handler = async (event) => {
+  let cognitoInfo = {
+    user: null,
+    groups: []
+  };
   try {
     // Extract Cognito user and groups
-    let cognitoInfo = {
-      user: null,
-      groups: []
-    };
+
 
     if (event.requestContext && event.requestContext.authorizer && event.requestContext.authorizer.claims) {
       const claims = event.requestContext.authorizer.claims;
@@ -15,10 +16,10 @@ export const handler = async (event) => {
     }
     // check event is not null or undefined
     if (!event || !event.resource || !event.httpMethod) {
+      console.log('no event, resource of method');
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'Bad request' }),
-        cognitoInfo
+        body: JSON.stringify({ error: 'Bad request', cognitoInfo })
       };
     }
     if (event.httpMethod === 'OPTIONS') {
@@ -29,8 +30,7 @@ export const handler = async (event) => {
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE',
           'Access-Control-Allow-Headers': 'Content-Type',
         },
-        body: JSON.stringify({ message: 'OPTIONS' }),
-        cognitoInfo
+        body: JSON.stringify({ message: 'OPTIONS' , cognitoInfo})
       };
     }
     const resource = event.resource.replace(/^\//, '');
@@ -44,14 +44,14 @@ export const handler = async (event) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ result }),
-      cognitoInfo
+      body: JSON.stringify({ result ,cognitoInfo})
     };
   } catch (error) {
     console.error('Error:', error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: 'Internal server error' })
+      body: JSON.stringify({ error: 'Internal server error', cognitoInfo })
+
     };
   } finally {
     console.log('Lambda function executed');
