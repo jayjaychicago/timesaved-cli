@@ -54,8 +54,11 @@ export async function POST(req: NextRequest) {
     var lambdaFunctionTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'lambda_function.mjs'), 'utf8');
 
     const spec = yaml.load(openApiSpec) as any;
+    // find the first resource and non-OPTIONS method in the OpenAPI spec
+    const firstResource = Object.keys(spec.paths)[0] || '';
+    const firstMethod = Object.keys(spec.paths[firstResource]).find(method => method.toLowerCase() !== 'options') || '';
     // Configure AWS SDK
-    AWS.config.update(awsCredentials);
+    AWS.config.update(awsCredentials); 
 
     // do the next two lines in one line
     const [terraformConfig, updatedLambdaFunctionTemplate] = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec, lambdaFunctionTemplate);
@@ -82,7 +85,7 @@ export async function POST(req: NextRequest) {
     zip.addFile('delete.sh', Buffer.from(cleanupScript));
 
     // Generate and add Terraform script
-    const terraformScript = generateTerraformScript();
+    const terraformScript = generateTerraformScript(firstResource, firstMethod);
     zip.addFile('terraform.sh', Buffer.from(terraformScript));
 
     const readmeContent = readme();
@@ -297,14 +300,32 @@ function readme(): string {
   `}
 
 
-function generateTerraformScript(): string {
+function generateTerraformScript(firstResource:string, firstMethod:string): string {
   return `
 #!/bin/bash
+
+# Check if Terraform is installed
+if ! command -v terraform &> /dev/null
+then
+    echo "Terraform could not be found. Please install Terraform to proceed."
+    exit 1
+fi
+
+# Check if AWS CLI is installed
+if ! command -v aws &> /dev/null
+then
+    echo "AWS CLI could not be found. Please install AWS CLI to proceed."
+    exit 1
+fi
+
+echo "Both Terraform and AWS CLI are installed. Proceeding with the script..."
+
 
 # Prompt for AWS credentials and region if not provided as arguments
 ACCESS_KEY_ID="\${1}"
 SECRET_ACCESS_KEY="\${2}"
 REGION="\${3}"
+EMAIL="\${4}"
 
 if [ -z "\${ACCESS_KEY_ID}" ]; then
   read -p "Enter your AWS Access Key ID: " ACCESS_KEY_ID
@@ -314,6 +335,9 @@ if [ -z "\${SECRET_ACCESS_KEY}" ]; then
 fi
 if [ -z "\${REGION}" ]; then
   read -p "Enter your AWS Region: " REGION
+fi
+if [ -z "\${EMAIL}" ]; then
+  read -p "Enter your email: " EMAIL
 fi
 
 # Find the .tf file in the current directory
@@ -332,13 +356,59 @@ escape_slash() {
 awk -v access_key="$ACCESS_KEY_ID" \
     -v secret_key="$SECRET_ACCESS_KEY" \
     -v region="$REGION" \
-    '{gsub(/ACCESS_KEY_ID_PLACEHOLDER/, access_key); gsub(/SECRET_ACCESS_KEY_PLACEHOLDER/, secret_key); gsub(/REGION_PLACEHOLDER/, region)}1' "$TF_FILE" > "$TF_FILE.tmp" && mv "$TF_FILE.tmp" "$TF_FILE"
+    -v email="$EMAIL" \
+    '{gsub(/ACCESS_KEY_ID_PLACEHOLDER/, access_key); gsub(/SECRET_ACCESS_KEY_PLACEHOLDER/, secret_key); gsub(/REGION_PLACEHOLDER/, region); gsub(/EMAIL_PLACEHOLDER/,email) }1' "$TF_FILE" > "$TF_FILE.tmp" && mv "$TF_FILE.tmp" "$TF_FILE"
+
 
 # Initialize, plan and apply Terraform
 terraform init
 terraform plan -out=tfplan
 terraform show tfplan
 terraform apply -auto-approve
+
+API_URL=$(terraform output -raw api_url)
+DEV_PORTAL_URL=$(terraform output -raw s3_bucket_website_endpoint)
+USER_POOL_ID=$(terraform output -raw user_pool_id)
+CLIENT_ID=$(terraform output -raw user_pool_client_id)
+ADMIN_PASSWORD=$(terraform output -raw admin_password)
+TESTUSER_PASSWORD=$(terraform output -raw testuser_password)
+
+get_id_token() {
+  local username=$1
+  local password=$2
+
+  aws cognito-idp initiate-auth \
+      --auth-flow USER_PASSWORD_AUTH \
+      --client-id $CLIENT_ID \
+      --auth-parameters "USERNAME=$username,PASSWORD='$password'" \
+      --query 'AuthenticationResult.IdToken' \
+      --output text
+}
+
+ADMIN_ID_TOKEN=$(get_id_token "admin" "$ADMIN_PASSWORD")
+TESTUSER_ID_TOKEN=$(get_id_token "testuser" "$TESTUSER_PASSWORD")
+
+echo "User admin Password: $ADMIN_PASSWORD"
+echo "User admin API Bearer Token: $ADMIN_ID_TOKEN"
+
+echo "User testuser Password: $TESTUSER_PASSWORD"
+echo "User testuser API Bearer Token: $TESTUSER_ID_TOKEN"
+
+
+echo ""
+echo ""
+echo ""
+echo "*******************************"
+echo "* YOUR API & DEV PORTAL INFO  *"
+echo "*******************************"
+echo ""
+echo "API URL: $API_URL"
+echo "Dev Portal URL: $DEV_PORTAL_URL"
+echo "Dev Portal Admin user: admin, Password: $ADMIN_PASSWORD  -- Test user: testuser, Password: $TESTUSER_PASSWORD"
+echo ""
+echo "Curl test: curl -X 'POST' '$API_URL/order' -H 'Authorization: Bearer $TESTUSER_ID_TOKEN'"
+
+
 `;
 }
 
@@ -411,6 +481,7 @@ delete_existing_resources() {
     else
         echo "S3 bucket \${bucket_name} not found or already deleted"
     fi
+    rm terraform.tfstate
 
     echo "Resource deletion process completed successfully."
 }
@@ -490,6 +561,82 @@ delete_existing_resources "${applicationName}"
         callback_urls                        = ["http://localhost:3000"]
         supported_identity_providers         = ["COGNITO"]
       }
+
+      # Create the admin group
+resource "aws_cognito_user_group" "admin_group" {
+  name         = "admins"
+  user_pool_id = aws_cognito_user_pool.main.id
+  description  = "Admin group"
+}
+
+# Create the users group
+resource "aws_cognito_user_group" "users_group" {
+  name         = "users"
+  user_pool_id = aws_cognito_user_pool.main.id
+  description  = "Regular users group"
+}
+
+# Create the admin user
+resource "aws_cognito_user" "admin_user" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  username     = "admin"
+  password     = random_password.admin_password.result
+
+  attributes = {
+    email          = "EMAIL_PLACEHOLDER"
+    email_verified = true
+  }
+}
+
+# Create the test user
+resource "aws_cognito_user" "test_user" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  username     = "testuser"
+  password     = random_password.testuser_password.result
+
+  attributes = {
+    email          = "EMAIL_PLACEHOLDER"
+    email_verified = true
+  }
+}
+
+# Add admin user to admin group
+resource "aws_cognito_user_in_group" "admin_user_in_admin_group" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  group_name   = aws_cognito_user_group.admin_group.name
+  username     = aws_cognito_user.admin_user.username
+}
+
+# Add test user to users group
+resource "aws_cognito_user_in_group" "test_user_in_users_group" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  group_name   = aws_cognito_user_group.users_group.name
+  username     = aws_cognito_user.test_user.username
+}
+
+# Generate random passwords
+resource "random_password" "admin_password" {
+  length  = 16
+  special = true
+  override_special = "!@#$%^&*()_+[]{}|;:,.<>?"
+  min_lower        = 1
+  min_upper        = 1
+  min_numeric      = 1
+  min_special      = 1
+}
+
+# Generate random passwords
+resource "random_password" "testuser_password" {
+  length  = 16
+  special = true
+  override_special = "!@#$%^&*()_+[]{}|;:,.<>?"
+  min_lower        = 1
+  min_upper        = 1
+  min_numeric      = 1
+  min_special      = 1
+}
+
+
     
       locals {
 
@@ -760,13 +907,14 @@ EOF
             dependsOnList.push(`aws_api_gateway_integration.${integrationResourceName}`);
             lambda_placeholder_replacement += `
                  if (event.httpMethod === '${method.toUpperCase()}' && event.resource === '${path}') {
-                  // Add your code here
-                  return {
-                    statusCode: 200,
-                    body: JSON.stringify({
-                      message: 'Your ${method.toUpperCase()} method on ${path} works!'
-                    })
-                  };
+                    // Add your code here
+                    result = {
+                      statusCode: 200,
+                      body: JSON.stringify({
+                        message: 'Your ${method.toUpperCase()} method on ${path} works!'
+                      })
+                   };
+                }
             `;
     
             config += `
@@ -867,18 +1015,39 @@ EOF
       value = aws_cognito_user_pool_client.main.id
     }
 
+
+    output "lambda_function_name" {
+      value = aws_lambda_function.api_lambda.function_name
+    }
+
+    # Outputs
+    output "user_pool_id" {
+      value = aws_cognito_user_pool.main.id
+    }
+    
+    output "user_pool_client_id" {
+      value = aws_cognito_user_pool_client.main.id
+    }
+
     output "s3_bucket_website_endpoint" {
       value = "https://\${aws_s3_bucket.website.bucket}.s3-${awsCredentials.region}.amazonaws.com/index.html"
     }
 
-    output "lambda_function_name" {
-      value = aws_lambda_function.api_lambda.function_name
-    }   
+    output "admin_password" {
+      value     = random_password.admin_password.result
+      sensitive = true
+    }
+    
+    output "testuser_password" {
+      value     = random_password.testuser_password.result
+      sensitive = true
+    }
+
     `;
 
       // Replace the placeholder in the lambda function template with the actual code
       console.log('Lambda placeholder replacement:', lambda_placeholder_replacement)
       lambdaFunctionTemplate = lambdaFunctionTemplate.replace('// PLACEHOLDER_API_ROUTES_HANDLER', lambda_placeholder_replacement);
     
-      return [config, lambdaFunctionTemplate];
+      return [config, lambdaFunctionTemplate]; 
     }
