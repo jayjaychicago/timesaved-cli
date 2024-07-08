@@ -44,6 +44,7 @@
         window.onload = function() {
             const baseUrl = window.location.origin;
             const token = localStorage.getItem('idToken');
+            console.log('Token set')
           const ui = SwaggerUIBundle({
             url: baseUrl + "/openapi.yaml", // You can also use a JSON object directly
             dom_id: '#swagger-ui',
