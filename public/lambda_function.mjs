@@ -26,9 +26,8 @@ export const handler = async (event) => {
       return {
         statusCode: 200,
         headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE',
-          'Access-Control-Allow-Headers': 'Content-Type',
+          "Access-Control-Allow-Origin" : "*",
+          "Access-Control-Allow-Credentials" : true
         },
         body: JSON.stringify({ message: 'OPTIONS' , cognitoInfo})
       };
@@ -44,11 +43,19 @@ export const handler = async (event) => {
 
     return {
       statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin" : "*",
+        "Access-Control-Allow-Credentials" : true
+      },
       body: JSON.stringify({ result ,cognitoInfo})
     };
   } catch (error) {
     console.error('Error:', error);
     return {
+      headers: {
+        "Access-Control-Allow-Origin" : "*",
+        "Access-Control-Allow-Credentials" : true
+      },
       statusCode: 500,
       body: JSON.stringify({ error: 'Internal server error', cognitoInfo })
 
