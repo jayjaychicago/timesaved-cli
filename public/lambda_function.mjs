@@ -47,7 +47,7 @@ export const handler = async (event) => {
         "Access-Control-Allow-Origin" : "*",
         "Access-Control-Allow-Credentials" : true
       },
-      body: JSON.stringify({ result ,cognitoInfo})
+      body: JSON.stringify({ result ,cognitoInfo}) 
     };
   } catch (error) {
     console.error('Error:', error);
