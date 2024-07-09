@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
 
     // Add files to the zip
     zip.addFile('auth.js.tpl', Buffer.from(authJsTemplate));
+    zip.addFile('openapi.yaml', Buffer.from(openApiSpec));
     zip.addFile('index.html', Buffer.from(indexHtmlTemplate));
     zip.addFile('lambda_function.zip', Buffer.from(zipBuffer0));
     zip.addFile(`${applicationName}.tf`, Buffer.from(terraformConfig));
@@ -491,20 +492,25 @@ delete_existing_resources "${applicationName}"
 `;
 }
 
-  function prepareOpenApiSpec(openApiSpec:string) {
-    // Regex to find existing server URL entries or spot where to insert a new one
-    const serverUrlRegex = /servers:\s*\n\s*- url: ["']([^"']+)["']/;
-    const hasServerUrl = serverUrlRegex.test(openApiSpec);
-  
-    if (hasServerUrl) {
-      // Replace existing URL with a placeholder
-      return openApiSpec.replace(serverUrlRegex, "servers:\n  - url: '{{{api_url}}}'\n");
-    } else {
+function prepareOpenApiSpec(openApiSpec:string) {
+  // Regex to find existing server URL entries
+  const serverUrlRegex = /servers:\s*\n\s*- url: ["']?([^"'\n]+)["']?/;
+  const hasServerUrl = serverUrlRegex.test(openApiSpec);
+
+  if (hasServerUrl) {
+      // Replace existing URL with a placeholder, accounting for potential format differences
+      return openApiSpec.replace(serverUrlRegex, "servers:\n  - url: '{{{api_url}}}'");
+  } else {
       // Insert a new server entry if none exists
       const insertPosition = openApiSpec.indexOf('paths:');
+      if (insertPosition === -1) {
+          // If 'paths:' is not found, append at the end of the spec
+          return openApiSpec + "\nservers:\n  - url: '{{{api_url}}}'\n";
+      }
       return openApiSpec.slice(0, insertPosition) + "servers:\n  - url: '{{{api_url}}}'\n" + openApiSpec.slice(insertPosition);
-    }
   }
+}
+
   
   
 
@@ -576,67 +582,10 @@ resource "aws_cognito_user_group" "users_group" {
   description  = "Regular users group"
 }
 
-# Create the admin user
-resource "aws_cognito_user" "admin_user" {
-  user_pool_id = aws_cognito_user_pool.main.id
-  username     = "admin"
-  password     = random_password.admin_password.result
 
-  attributes = {
-    email          = "EMAIL_PLACEHOLDER"
-    email_verified = true
-  }
+data "local_file" "openapi_spec" {
+  filename = "\${path.module}/openapi.yaml"
 }
-
-# Create the test user
-resource "aws_cognito_user" "test_user" {
-  user_pool_id = aws_cognito_user_pool.main.id
-  username     = "testuser"
-  password     = random_password.testuser_password.result
-
-  attributes = {
-    email          = "EMAIL_PLACEHOLDER"
-    email_verified = true
-  }
-}
-
-# Add admin user to admin group
-resource "aws_cognito_user_in_group" "admin_user_in_admin_group" {
-  user_pool_id = aws_cognito_user_pool.main.id
-  group_name   = aws_cognito_user_group.admin_group.name
-  username     = aws_cognito_user.admin_user.username
-}
-
-# Add test user to users group
-resource "aws_cognito_user_in_group" "test_user_in_users_group" {
-  user_pool_id = aws_cognito_user_pool.main.id
-  group_name   = aws_cognito_user_group.users_group.name
-  username     = aws_cognito_user.test_user.username
-}
-
-# Generate random passwords
-resource "random_password" "admin_password" {
-  length  = 16
-  special = true
-  override_special = "!@#$%^&*()_+[]{}|;:,.<>?"
-  min_lower        = 1
-  min_upper        = 1
-  min_numeric      = 1
-  min_special      = 1
-}
-
-# Generate random passwords
-resource "random_password" "testuser_password" {
-  length  = 16
-  special = true
-  override_special = "!@#$%^&*()_+[]{}|;:,.<>?"
-  min_lower        = 1
-  min_upper        = 1
-  min_numeric      = 1
-  min_special      = 1
-}
-
-
     
       locals {
 
@@ -658,6 +607,36 @@ EOF
           "{{{client_id}}}", aws_cognito_user_pool_client.main.id
         )
         openapi_yaml_content = replace(local.openapi_yaml_content2, "{{{api_url}}}", aws_api_gateway_deployment.api_deployment.invoke_url)
+      
+        openapi_spec = yamldecode(data.local_file.openapi_spec.content)
+        modified_spec = merge(local.openapi_spec, {
+          components = merge(try(local.openapi_spec.components, {}), {
+            securitySchemes = {
+              cognito-authorizer = {
+                type = "apiKey"
+                name = "Authorization"
+                in = "header"
+                x-amazon-apigateway-authtype = "cognito_user_pools"
+                x-amazon-apigateway-authorizer = {
+                  type = "cognito_user_pools"
+                  providerARNs = [aws_cognito_user_pool.main.arn]
+                }
+              }
+            }
+          })
+          paths = {
+            for path, methods in local.openapi_spec.paths : path => {
+              for method, config in methods : method => merge(config, {
+                security = method != "options" ? [{ "cognito-authorizer" = [] }] : []
+                x-amazon-apigateway-integration = {
+                  uri = aws_lambda_function.api_lambda.invoke_arn
+                  httpMethod = "POST"
+                  type = "aws_proxy"
+                }
+              })
+            }
+          }
+        })
       }
       
       
@@ -802,6 +781,17 @@ EOF
     resource "aws_api_gateway_rest_api" "api" {
       name = "${apiName}"
       description = "API Gateway for ${applicationName}"
+      body = yamlencode(local.modified_spec)
+
+      endpoint_configuration {
+        types = ["REGIONAL"]
+      }
+    
+      depends_on = [
+        aws_cognito_user_pool.main,
+        aws_lambda_function.api_lambda,
+        aws_iam_role.lambda_role
+      ]
     }
 
     # Enable CORS for the entire API
@@ -822,6 +812,7 @@ EOF
       rest_api_id = aws_api_gateway_rest_api.api.id
       resource_id = aws_api_gateway_resource.cors.id
       http_method = aws_api_gateway_method.cors.http_method
+      
       type        = "MOCK"
       request_templates = {
         "application/json" = jsonencode({
@@ -830,16 +821,58 @@ EOF
       }
     }
 
+    resource "aws_api_gateway_method_response" "cors" {
+      rest_api_id = aws_api_gateway_rest_api.api.id
+      resource_id = aws_api_gateway_resource.cors.id
+      http_method = aws_api_gateway_method.cors.http_method
+      status_code = "200"
+      
+      response_parameters = {
+        "method.response.header.Access-Control-Allow-Headers" = true,
+        "method.response.header.Access-Control-Allow-Methods" = true,
+        "method.response.header.Access-Control-Allow-Origin"  = true
+      }
+    }
+    
+    resource "aws_api_gateway_integration_response" "cors" {
+      rest_api_id = aws_api_gateway_rest_api.api.id
+      resource_id = aws_api_gateway_resource.cors.id
+      http_method = aws_api_gateway_method.cors.http_method
+      status_code = aws_api_gateway_method_response.cors.status_code
+      
+      response_parameters = {
+        "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+        "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS,POST,PUT'",
+        "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+      }
+    }
+    
+
+
+    resource "aws_api_gateway_gateway_response" "cors" {
+      rest_api_id = aws_api_gateway_rest_api.api.id
+      status_code = "200"
+      response_type = "DEFAULT_4XX"
+    
+      response_parameters = {
+        "gatewayresponse.header.Access-Control-Allow-Origin" = "'*'",
+        "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+        "gatewayresponse.header.Access-Control-Allow-Methods" = "'GET,OPTIONS,POST,PUT'"
+      }
+    }
     
     
     
     resource "aws_api_gateway_authorizer" "cognito" {
-      name          = "cognito-authorizer"
+      name          = "cognito-authorizer-${applicationName}"
       type          = "COGNITO_USER_POOLS"
       rest_api_id   = aws_api_gateway_rest_api.api.id
       provider_arns = [aws_cognito_user_pool.main.arn]
+      depends_on = [aws_cognito_user_pool.main, aws_api_gateway_rest_api.api]
     }
-    
+ 
+
+
     resource "aws_lambda_function" "api_lambda" {
       filename      = "lambda_function.zip"
       function_name = "${lambdaFunctionName}"
@@ -910,6 +943,71 @@ EOF
         ]
       })
     }
+
+
+# Create the admin user
+resource "aws_cognito_user" "admin_user" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  username     = "admin"
+  password     = random_password.admin_password.result
+
+  attributes = {
+    email          = "EMAIL_PLACEHOLDER"
+    email_verified = true
+  }
+  depends_on = [aws_cognito_user_pool.main, aws_cognito_user_pool_client.main, aws_cognito_user_group.admin_group, aws_api_gateway_authorizer.cognito]
+}
+
+# Create the test user
+resource "aws_cognito_user" "test_user" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  username     = "testuser"
+  password     = random_password.testuser_password.result
+
+  attributes = {
+    email          = "EMAIL_PLACEHOLDER"
+    email_verified = true
+  }
+  depends_on = [aws_cognito_user_pool.main, aws_cognito_user_pool_client.main, aws_cognito_user_group.users_group, aws_api_gateway_authorizer.cognito]
+}
+
+# Add admin user to admin group
+resource "aws_cognito_user_in_group" "admin_user_in_admin_group" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  group_name   = aws_cognito_user_group.admin_group.name
+  username     = aws_cognito_user.admin_user.username
+  depends_on = [aws_cognito_user.admin_user, aws_cognito_user_group.admin_group]
+}
+
+# Add test user to users group
+resource "aws_cognito_user_in_group" "test_user_in_users_group" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  group_name   = aws_cognito_user_group.users_group.name
+  username     = aws_cognito_user.test_user.username
+  depends_on = [aws_cognito_user.test_user, aws_cognito_user_group.users_group]
+}
+
+# Generate random passwords
+resource "random_password" "admin_password" {
+  length  = 16
+  special = true
+  override_special = "!@#$%^&*()_+[]{}|;:,.<>?"
+  min_lower        = 1
+  min_upper        = 1
+  min_numeric      = 1
+  min_special      = 1
+}
+
+# Generate random passwords
+resource "random_password" "testuser_password" {
+  length  = 16
+  special = true
+  override_special = "!@#$%^&*()_+[]{}|;:,.<>?"
+  min_lower        = 1
+  min_upper        = 1
+  min_numeric      = 1
+  min_special      = 1
+}
     `;
     
       const dependsOnList = [];
@@ -919,18 +1017,18 @@ EOF
         const resourceName = path.replace(/[^a-zA-Z0-9]/g, '_').replace(/^_/, '');
         const uniqueId = uuidv4().split('-')[0]; // Use first part of UUID for brevity
     
-        config += `
+        /*config += `
     resource "aws_api_gateway_resource" "${resourceName}_${uniqueId}" {
       rest_api_id = aws_api_gateway_rest_api.api.id
       parent_id   = aws_api_gateway_rest_api.api.root_resource_id
       path_part   = "${path.replace(/^\//, '')}"
     }
-    `;
+    `;*/
     
         for (const [method, operation] of Object.entries(pathItem as Record<string, unknown>)) {
           if (method.toLowerCase() !== 'options') {
-            const integrationResourceName = `${resourceName}_${method.toLowerCase()}_${uniqueId}`;
-            dependsOnList.push(`aws_api_gateway_integration.${integrationResourceName}`);
+            //const integrationResourceName = `${resourceName}_${method.toLowerCase()}_${uniqueId}`;
+            //dependsOnList.push(`aws_api_gateway_integration.${integrationResourceName}`);
             lambda_placeholder_replacement += `
                  if (event.httpMethod === '${method.toUpperCase()}' && event.resource === '${path}') {
                     // Add your code here
@@ -943,7 +1041,7 @@ EOF
                 }
             `;
     
-            config += `
+           /* config += `
     resource "aws_api_gateway_method" "${integrationResourceName}" {
       rest_api_id   = aws_api_gateway_rest_api.api.id
       resource_id   = aws_api_gateway_resource.${resourceName}_${uniqueId}.id
@@ -961,11 +1059,12 @@ EOF
       type                    = "AWS_PROXY"
       uri                     = aws_lambda_function.api_lambda.invoke_arn
     }
-    `;
+    `; */
           }
         }
     
         // Add OPTIONS method for CORS
+        /*
         config += `
     resource "aws_api_gateway_method" "${resourceName}_options_${uniqueId}" {
       rest_api_id   = aws_api_gateway_rest_api.api.id
@@ -1017,13 +1116,12 @@ EOF
       depends_on = [aws_api_gateway_integration.${resourceName}_options_${uniqueId}]
     }
     
-    `;
+    `; */
       }
     
       // Add deployment resource
       config += `
     resource "aws_api_gateway_deployment" "api_deployment" {
-      depends_on = [${dependsOnList.join(', ')}]
     
       rest_api_id = aws_api_gateway_rest_api.api.id
       stage_name  = "prod"
@@ -1067,6 +1165,11 @@ EOF
     output "testuser_password" {
       value     = random_password.testuser_password.result
       sensitive = true
+    }
+
+    output "modified_openapi_spec" {
+      description = "The modified OpenAPI specification"
+      value       = yamlencode(local.modified_spec)
     }
 
     `;
