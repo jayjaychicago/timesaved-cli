@@ -55,8 +55,21 @@ export async function POST(req: NextRequest) {
 
     const spec = yaml.load(openApiSpec) as any;
     // find the first resource and non-OPTIONS method in the OpenAPI spec
-    const firstResource = Object.keys(spec.paths)[0] || '';
-    const firstMethod = Object.keys(spec.paths[firstResource]).find(method => method.toLowerCase() !== 'options') || '';
+    let firstResourceOrigin = '';
+    let firstResource = '';
+    let firstMethod = '';
+    try {
+      firstResourceOrigin = Object.keys(spec.paths)[0] || '';
+      firstResource = firstResourceOrigin.replace(/\{[^\}]+\}/g, "MOCK_DATA");
+      firstMethod = Object.keys(spec.paths[firstResourceOrigin]).find(method => method.toLowerCase() !== 'options')?.toUpperCase() || '';
+    } catch (error) {
+      console.error('Error finding first resource and method:', error);
+    } finally {
+      console.log('First resource Origin:', firstResourceOrigin);
+      console.log('First resource:', firstResource);
+      console.log('First method:', firstMethod);
+    }
+
     // Configure AWS SDK
     AWS.config.update(awsCredentials); 
 
@@ -407,7 +420,7 @@ echo "API URL: $API_URL"
 echo "Dev Portal URL: $DEV_PORTAL_URL"
 echo "Dev Portal Admin user: admin, Password: $ADMIN_PASSWORD  -- Test user: testuser, Password: $TESTUSER_PASSWORD"
 echo ""
-echo "Curl test: curl -X 'POST' '$API_URL/order' -H 'Authorization: Bearer $TESTUSER_ID_TOKEN'"
+echo "Curl test: curl -X '${firstMethod}' '$API_URL${firstResource}' -H 'Authorization: Bearer $TESTUSER_ID_TOKEN'"
 
 
 `;
