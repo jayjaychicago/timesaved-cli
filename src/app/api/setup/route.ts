@@ -615,7 +615,8 @@ ${preparedSpec}
 EOF
 
         index_html_content_step1 = replace(local.index_html_template, "{{{client_id}}}", aws_cognito_user_pool_client.main.id)
-        index_html_content = replace(local.index_html_content_step1, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
+        index_html_content_step2 = replace(local.index_html_content_step1, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
+        index_html_content = replace(local.index_html_content_step2, "{{{application}}}", "${applicationName}")
 
         devportal_html_content = replace(local.devportal_html_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
         auth_js_content = replace(
