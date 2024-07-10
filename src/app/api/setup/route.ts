@@ -386,7 +386,7 @@ DEV_PORTAL_URL=$(terraform output -raw s3_bucket_website_endpoint)
 USER_POOL_ID=$(terraform output -raw user_pool_id)
 CLIENT_ID=$(terraform output -raw user_pool_client_id)
 ADMIN_PASSWORD=$(terraform output -raw admin_password)
-TESTUSER_PASSWORD=$(terraform output -raw testuser_password) 
+ 
 
 get_id_token() {
   local username=$1
@@ -400,14 +400,10 @@ get_id_token() {
       --output text
 }
 
-ADMIN_ID_TOKEN=$(get_id_token "admin" "$ADMIN_PASSWORD")
-TESTUSER_ID_TOKEN=$(get_id_token "testuser" "$TESTUSER_PASSWORD")
+ADMIN_ID_TOKEN=$(get_id_token "\${EMAIL}" "$ADMIN_PASSWORD")
 
-echo "User admin Password: $ADMIN_PASSWORD"
-echo "User admin API Bearer Token: $ADMIN_ID_TOKEN"
-
-echo "User testuser Password: $TESTUSER_PASSWORD"
-echo "User testuser API Bearer Token: $TESTUSER_ID_TOKEN"
+echo "Admin user \${EMAIL} Password: $ADMIN_PASSWORD"
+echo "Admin user \${EMAIL} API Bearer Token: $ADMIN_ID_TOKEN"
 
 
 echo ""
@@ -419,9 +415,9 @@ echo "*******************************"
 echo ""
 echo "API URL: $API_URL"
 echo "Dev Portal URL: $DEV_PORTAL_URL"
-echo "Dev Portal Admin user: admin, Password: $ADMIN_PASSWORD  -- Test user: testuser, Password: $TESTUSER_PASSWORD"
+echo "Dev Portal Admin user: \${EMAIL}, Password: $ADMIN_PASSWORD"
 echo ""
-echo "Curl test: curl -X '${firstMethod}' '$API_URL${firstResource}' -H 'Authorization: Bearer $TESTUSER_ID_TOKEN'"
+echo "Curl test: curl -X '${firstMethod}' '$API_URL${firstResource}' -H 'Authorization: Bearer $ADMIN_ID_TOKEN'"
 
 
 `;
@@ -978,7 +974,7 @@ EOF
 # Create the admin user
 resource "aws_cognito_user" "admin_user" {
   user_pool_id = aws_cognito_user_pool.main.id
-  username     = "admin"
+  username     = "EMAIL_PLACEHOLDER"
   password     = random_password.admin_password.result
 
   attributes = {
@@ -988,18 +984,6 @@ resource "aws_cognito_user" "admin_user" {
   depends_on = [aws_cognito_user_pool.main, aws_cognito_user_pool_client.main, aws_cognito_user_group.admin_group, aws_api_gateway_authorizer.cognito]
 }
 
-# Create the test user
-resource "aws_cognito_user" "test_user" {
-  user_pool_id = aws_cognito_user_pool.main.id
-  username     = "testuser"
-  password     = random_password.testuser_password.result
-
-  attributes = {
-    email          = "EMAIL_PLACEHOLDER"
-    email_verified = true
-  }
-  depends_on = [aws_cognito_user_pool.main, aws_cognito_user_pool_client.main, aws_cognito_user_group.users_group, aws_api_gateway_authorizer.cognito]
-}
 
 # Add admin user to admin group
 resource "aws_cognito_user_in_group" "admin_user_in_admin_group" {
@@ -1009,13 +993,6 @@ resource "aws_cognito_user_in_group" "admin_user_in_admin_group" {
   depends_on = [aws_cognito_user.admin_user, aws_cognito_user_group.admin_group]
 }
 
-# Add test user to users group
-resource "aws_cognito_user_in_group" "test_user_in_users_group" {
-  user_pool_id = aws_cognito_user_pool.main.id
-  group_name   = aws_cognito_user_group.users_group.name
-  username     = aws_cognito_user.test_user.username
-  depends_on = [aws_cognito_user.test_user, aws_cognito_user_group.users_group]
-}
 
 # Generate random passwords
 resource "random_password" "admin_password" {
@@ -1028,16 +1005,6 @@ resource "random_password" "admin_password" {
   min_special      = 1
 }
 
-# Generate random passwords
-resource "random_password" "testuser_password" {
-  length  = 16
-  special = true
-  override_special = "!@#$%^&*()_+[]{}|;:,.<>?"
-  min_lower        = 1
-  min_upper        = 1
-  min_numeric      = 1
-  min_special      = 1
-}
     `;
     
       const dependsOnList = [];
@@ -1192,10 +1159,6 @@ resource "random_password" "testuser_password" {
       sensitive = true
     }
     
-    output "testuser_password" {
-      value     = random_password.testuser_password.result
-      sensitive = true
-    }
 
     output "modified_openapi_spec" {
       description = "The modified OpenAPI specification"

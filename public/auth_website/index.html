@@ -150,6 +150,9 @@
     </div>
 
     <script>
+
+        // verify if still logged in using cognito then redirect to devportal without using token
+
         // Cognito configuration
         const poolData = {
             UserPoolId: '{{{user_pool_id}}}',
@@ -157,6 +160,42 @@
         };
 
         const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
+
+        function getCurrentCognitoUser() {
+            return userPool.getCurrentUser();
+        }
+
+        // Function to check if the user is still in a valid session
+        function checkUserSession() {
+            return new Promise((resolve, reject) => {
+                const cognitoUser = getCurrentCognitoUser();
+                if (cognitoUser != null) {
+                    cognitoUser.getSession(function(err, session) {
+                        if (err) {
+                            console.error("Error getting session:", err);
+                            reject(false);
+                        } else {
+                            console.log("Session validity:", session.isValid());
+                            resolve(session.isValid());
+                        }
+                    });
+                } else {
+                    console.log("No current user.");
+                    resolve(false);
+                }
+            });
+         }
+         
+
+        // Check if the user session is valid
+        checkUserSession().then(isUserSessionValid => {
+            console.log("Is user session valid?", isUserSessionValid);
+            if (isUserSessionValid) {
+                window.location.href = 'devportal.html';
+            }
+        }).catch(error => {
+            console.error("Error checking user session:", error);
+        });
 
         // Helper function to show/hide forms
         function showForm(formId) {
@@ -237,9 +276,9 @@
             cognitoUser.authenticateUser(authenticationDetails, {
                 onSuccess: function(result) {
                     showMessage('Login successful. Redirecting to developer portal...');
-                    setTimeout(() => {
-                        window.location.href = 'devportal.html';
-                    }, 2000);
+                    const idToken = result.getIdToken().getJwtToken();
+                    localStorage.setItem('idToken', idToken);
+                    window.location.href = 'devportal.html';
                 },
                 onFailure: function(err) {
                     showMessage(err.message, true);
