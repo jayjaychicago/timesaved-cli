@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
     // Read auth.js.tpl and index.html contents
     const authJsTemplate = fs.readFileSync(path.join(process.cwd(), 'public/auth_website', 'auth.js.tpl'), 'utf8');
     const indexHtmlTemplate = fs.readFileSync(path.join(process.cwd(), 'public/auth_website', 'index.html'), 'utf8');
+    const devPortalTemplate = fs.readFileSync(path.join(process.cwd(), 'public/auth_website', 'devportal.html'), 'utf8');
     var lambdaFunctionTemplate = fs.readFileSync(path.join(process.cwd(), 'public', 'lambda_function.mjs'), 'utf8');
 
     const spec = yaml.load(openApiSpec) as any;
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
     AWS.config.update(awsCredentials); 
 
     // do the next two lines in one line
-    const [terraformConfig, updatedLambdaFunctionTemplate] = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, openApiSpec, lambdaFunctionTemplate);
+    const [terraformConfig, updatedLambdaFunctionTemplate] = generateTerraformConfig(spec, awsCredentials, applicationName, authJsTemplate, indexHtmlTemplate, devPortalTemplate, openApiSpec, lambdaFunctionTemplate);
     lambdaFunctionTemplate = updatedLambdaFunctionTemplate;
 
     console.log('Terraform configuration completed.');
@@ -525,9 +526,8 @@ function prepareOpenApiSpec(openApiSpec:string) {
 }
 
   
-  
 
-    function generateTerraformConfig(spec: any, awsCredentials: any, applicationName: string, authJsTemplate: string, indexHtmlTemplate: string, openApiSpec:string, lambdaFunctionTemplate:string) {
+    function generateTerraformConfig(spec: any, awsCredentials: any, applicationName: string, authJsTemplate: string, indexHtmlTemplate: string, devPortalHtmlTemplate:string, openApiSpec:string, lambdaFunctionTemplate:string) {
       const apiName = applicationName.replace(/\s+/g, '-').toLowerCase();
       const lambdaFunctionName = `${apiName}-lambda`;
       const bucketName = `${apiName}-auth-website`;
@@ -605,6 +605,10 @@ data "local_file" "openapi_spec" {
         index_html_template = <<EOF
 ${indexHtmlTemplate}
 EOF
+
+devportal_html_template = <<EOF
+${devPortalHtmlTemplate}
+EOF
       
 auth_js_template = <<EOF
 ${authJsTemplate}
@@ -613,8 +617,11 @@ EOF
       openapi_yaml_content2 = <<-EOF
 ${preparedSpec}
 EOF
-      
-        index_html_content = replace(local.index_html_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
+
+        index_html_content_step1 = replace(local.index_html_template, "{{{client_id}}}", aws_cognito_user_pool_client.main.id)
+        index_html_content = replace(local.index_html_content_step1, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
+
+        devportal_html_content = replace(local.devportal_html_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id)
         auth_js_content = replace(
           replace(local.auth_js_template, "{{{user_pool_id}}}", aws_cognito_user_pool.main.id),
           "{{{client_id}}}", aws_cognito_user_pool_client.main.id
@@ -770,7 +777,17 @@ EOF
       etag         = md5(local.index_html_content)
       acl          = "public-read"
     }
-    
+
+    resource "aws_s3_object" "devportal_html" {
+      depends_on   = [aws_s3_bucket_public_access_block.website, aws_api_gateway_deployment.api_deployment]
+      bucket       = aws_s3_bucket.website.id
+      key          = "devportal.html"
+      content_type = "text/html"
+      content      = local.devportal_html_content
+      etag         = md5(local.devportal_html_content)
+      acl          = "public-read"
+    }
+
     resource "aws_s3_object" "auth_js" {
       depends_on   = [aws_s3_bucket_public_access_block.website, aws_api_gateway_deployment.api_deployment]
       bucket       = aws_s3_bucket.website.id
@@ -1043,7 +1060,7 @@ resource "random_password" "testuser_password" {
             //const integrationResourceName = `${resourceName}_${method.toLowerCase()}_${uniqueId}`;
             //dependsOnList.push(`aws_api_gateway_integration.${integrationResourceName}`);
             lambda_placeholder_replacement += `
-                 if (event.httpMethod === '${method.toUpperCase()}' && event.resource === '${path}') {
+                 if (method === '${method.toUpperCase()}' && resource === '${path}') {
                     // Add your code here
                     result = {
                       statusCode: 200,

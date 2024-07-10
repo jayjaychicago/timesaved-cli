@@ -3,71 +3,317 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Authentication</title>
+    <title>Cognito Authentication</title>
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1001.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js/dist/amazon-cognito-identity.min.js"></script>
-    <script src="auth.js" defer></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 400px;
+            transition: all 0.3s ease;
+        }
+        .container:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 25px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            text-align: center;
+            color: #4a5568;
+            margin-bottom: 1.5rem;
+            font-size: 2rem;
+        }
+        h2 {
+            color: #2d3748;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+        }
+        input {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            background-color: #667eea;
+            color: white;
+            border: none;
+            padding: 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            font-size: 1rem;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #5a67d8;
+        }
+        .error {
+            color: #e53e3e;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+        .success {
+            color: #38a169;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+        .links {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 1rem;
+        }
+        .links a {
+            color: #4a5568;
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: color 0.3s ease;
+        }
+        .links a:hover {
+            color: #667eea;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+
 </head>
 <body>
-    <h1>API Authentication</h1>
-    
-    <h2>Sign Up</h2>
-    <form id="signupForm">
-        <input type="text" id="signupUsername" placeholder="Username" required>
-        <input type="email" id="signupEmail" placeholder="Email" required>
-        <input type="password" id="signupPassword" placeholder="Password" required>
-        <button type="submit">Sign Up</button>
-    </form>
+    <div class="container">
+        <h1>Cognito Authentication</h1>
+        <div id="loginForm">
+            <h2>Sign In</h2>
+            <form id="login">
+                <input type="email" id="loginEmail" placeholder="Email" required>
+                <input type="password" id="loginPassword" placeholder="Password" required>
+                <button type="submit">Sign In</button>
+            </form>
+            <div class="links">
+                <a href="#" id="showSignup">Sign Up</a>
+                <a href="#" id="showChangePassword">Change Password</a>
+            </div>
+        </div>
+        <div id="signupForm" class="hidden">
+            <h2>Sign Up</h2>
+            <form id="signup">
+                <input type="email" id="signupEmail" placeholder="Email" required>
+                <input type="password" id="signupPassword" placeholder="Password" required>
+                <button type="submit">Sign Up</button>
+            </form>
+            <div class="links">
+                <a href="#" id="showLogin">Back to Sign In</a>
+            </div>
+        </div>
+        <div id="verificationForm" class="hidden">
+            <h2>Verify Account</h2>
+            <form id="verify">
+                <input type="text" id="verificationCode" placeholder="Verification Code" required>
+                <button type="submit">Verify</button>
+            </form>
+        </div>
+        <div id="changePasswordForm" class="hidden">
+            <h2>Change Password</h2>
+            <form id="changePassword">
+                <input type="email" id="changePasswordEmail" placeholder="Email" required>
+                <input type="password" id="oldPassword" placeholder="Old Password" required>
+                <input type="password" id="newPassword" placeholder="New Password" required>
+                <button type="submit">Change Password</button>
+            </form>
+            <div class="links">
+                <a href="#" id="showLoginFromChange">Back to Sign In</a>
+            </div>
+        </div>
+        <div id="message"></div>
+    </div>
 
-    <h2>Confirm Sign Up</h2>
-    <form id="confirmForm">
-        <input type="text" id="confirmUsername" placeholder="Username" required>
-        <input type="text" id="confirmCode" placeholder="Confirmation Code" required>
-        <button type="submit">Confirm</button>
-    </form>
-
-    <h2>Sign In</h2>
-    <form id="signinForm">
-        <input type="text" id="signinUsername" placeholder="Username" required>
-        <input type="password" id="signinPassword" placeholder="Password" required>
-        <button type="submit">Sign In</button>
-    </form>
-
-    <div id="tokenDisplay"></div>
-    <div id="swagger-ui"></div>
-
-    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui-bundle.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@4/swagger-ui-standalone-preset.js"></script>
-    <script src="auth.js"></script> <!-- Your existing JavaScript file -->
     <script>
-        // Initialize Swagger UI on your API specification
-        window.onload = function() {
-            const baseUrl = window.location.origin;
-            const token = localStorage.getItem('idToken');
-            console.log('Token set')
-          const ui = SwaggerUIBundle({
-            url: baseUrl + "/openapi.yaml", // You can also use a JSON object directly
-            dom_id: '#swagger-ui',
-            deepLinking: true,
-            presets: [
-              SwaggerUIBundle.presets.apis,
-              SwaggerUIStandalonePreset
-            ],
-            plugins: [
-              SwaggerUIBundle.plugins.DownloadUrl
-            ],
-            layout: "StandaloneLayout",
-            requestInterceptor: (request) => {
-                // Check if the request is for the S3 bucket
-                if (!request.url.includes(baseUrl)) {
-                    request.headers.Authorization = "Bearer " + token;
-                }
-                return request;
-            }
-          });
+        // Cognito configuration
+        const poolData = {
+            UserPoolId: '{{{user_pool_id}}}',
+            ClientId: '{{{client_id}}}'
+        };
+
+        const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
+
+        // Helper function to show/hide forms
+        function showForm(formId) {
+            document.querySelectorAll('div[id$="Form"]').forEach(form => form.classList.add('hidden'));
+            document.getElementById(formId).classList.remove('hidden');
         }
+
+        // Helper function to display messages
+        function showMessage(message, isError = false) {
+            const messageElement = document.getElementById('message');
+            messageElement.textContent = message;
+            messageElement.className = isError ? 'error' : 'success';
+        }
+
+        // Sign Up
+        document.getElementById('signup').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const email = document.getElementById('signupEmail').value;
+            const password = document.getElementById('signupPassword').value;
+
+            const attributeList = [
+                new AmazonCognitoIdentity.CognitoUserAttribute({
+                    Name: 'email',
+                    Value: email
+                })
+            ];
+
+            userPool.signUp(email, password, attributeList, null, function(err, result) {
+                if (err) {
+                    showMessage(err.message, true);
+                    return;
+                }
+                showMessage('Signup successful. Please check your email for the verification code.');
+                showForm('verificationForm');
+            });
+        });
+
+        // Verify
+        document.getElementById('verify').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const email = document.getElementById('signupEmail').value;
+            const code = document.getElementById('verificationCode').value;
+
+            const userData = {
+                Username: email,
+                Pool: userPool
+            };
+
+            const cognitoUser = new AmazonCognitoIdentity.CognitoUser(userData);
+            cognitoUser.confirmRegistration(code, true, function(err, result) {
+                if (err) {
+                    showMessage(err.message, true);
+                    return;
+                }
+                showMessage('Verification successful. You can now sign in.');
+                showForm('loginForm');
+            });
+        });
+
+        // Login
+        document.getElementById('login').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            const authenticationData = {
+                Username: email,
+                Password: password,
+            };
+            const authenticationDetails = new AmazonCognitoIdentity.AuthenticationDetails(authenticationData);
+
+            const userData = {
+                Username: email,
+                Pool: userPool
+            };
+            const cognitoUser = new AmazonCognitoIdentity.CognitoUser(userData);
+
+            cognitoUser.authenticateUser(authenticationDetails, {
+                onSuccess: function(result) {
+                    showMessage('Login successful. Redirecting to developer portal...');
+                    setTimeout(() => {
+                        window.location.href = 'devportal.html';
+                    }, 2000);
+                },
+                onFailure: function(err) {
+                    showMessage(err.message, true);
+                },
+                newPasswordRequired: function(userAttributes, requiredAttributes) {
+                    showMessage('You need to change your password. Use the Change Password form.');
+                    showForm('changePasswordForm');
+                }
+            });
+        });
+
+        // Change Password
+        document.getElementById('changePassword').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const email = document.getElementById('changePasswordEmail').value;
+            const oldPassword = document.getElementById('oldPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+
+            const authenticationData = {
+                Username: email,
+                Password: oldPassword,
+            };
+            const authenticationDetails = new AmazonCognitoIdentity.AuthenticationDetails(authenticationData);
+
+            const poolData = {
+                UserPoolId: '{{{user_pool_id}}}',
+                ClientId: '{{{client_id}}}'
+            };
+
+            const cognitoUser = new AmazonCognitoIdentity.CognitoUser(userData);
+
+            cognitoUser.authenticateUser(authenticationDetails, {
+                onSuccess: function(result) {
+                    cognitoUser.changePassword(oldPassword, newPassword, function(err, result) {
+                        if (err) {
+                            showMessage(err.message, true);
+                            return;
+                        }
+                        showMessage('Password changed successfully. You can now sign in with your new password.');
+                        showForm('loginForm');
+                    });
+                },
+                onFailure: function(err) {
+                    showMessage(err.message, true);
+                }
+            });
+        });
+
+        // Show Sign Up form
+        document.getElementById('showSignup').addEventListener('click', function(e) {
+            e.preventDefault();
+            showForm('signupForm');
+        });
+
+        // Show Login form
+        document.getElementById('showLogin').addEventListener('click', function(e) {
+            e.preventDefault();
+            showForm('loginForm');
+        });
+
+        // Show Change Password form
+        document.getElementById('showChangePassword').addEventListener('click', function(e) {
+            e.preventDefault();
+            showForm('changePasswordForm');
+        });
+
+        // Show Login form from Change Password
+        document.getElementById('showLoginFromChange').addEventListener('click', function(e) {
+            e.preventDefault();
+            showForm('loginForm');
+        });
+
+        // Initial form display
+        showForm('loginForm');
     </script>
-
-
 </body>
 </html>

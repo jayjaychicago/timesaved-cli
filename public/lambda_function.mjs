@@ -1,4 +1,23 @@
 
+function process(resource, method, data, user, grous) {
+  console.log('Processing:', resource, method, data, user, grous);
+  let result = {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    },
+    statusCode: 500,
+    body: JSON.stringify({ error: 'No defined process for this resource method combination' })
+
+  };
+
+  // PLACEHOLDER_API_ROUTES_HANDLER
+  // Ensure result is defined or properly fetched
+  return result;
+
+}
 
 export const handler = async (event) => {
   let cognitoInfo = {
@@ -28,27 +47,37 @@ export const handler = async (event) => {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Credentials": "true",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization"
         },
         body: JSON.stringify({ message: 'OPTIONS' , cognitoInfo})
       };
     }
-    const resource = event.resource.replace(/^\//, '');
-    const method = event.httpMethod.toLowerCase();
+    const resource = "/" + event.resource.replace(/^\//, '');
+    const method = event.httpMethod.toLowerCase().toUpperCase();
     const scriptKey = `${resource}:${method}`;
-    let result; 
-
-    // PLACEHOLDER_API_ROUTES_HANDLER
-    // Ensure result is defined or properly fetched
-    
+    let data = {};
+    if (['GET', 'DELETE','HEAD'].includes(method)) {
+      data = event.queryStringParameters;
+    } else if (['POST', 'PUT', 'PATCH'].includes(method)) {
+      data = JSON.parse(event.body);
+    } else {
+      // This could either handle more cases or simply return a method not allowed error
+      // Here, we handle all other cases as 'Unsupported method' but still allow them to proceed
+      return {
+        statusCode: 405,
+        body: JSON.stringify({ error: 'Method not allowed', cognitoInfo })
+      };
+    }
+  
+    let result = process(resource, method, data, cognitoInfo.user, cognitoInfo.groups);     
 
     return {
       statusCode: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization"
       },
       body: JSON.stringify({ result ,cognitoInfo}) 
@@ -59,7 +88,7 @@ export const handler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization"
       },
       statusCode: 500,
